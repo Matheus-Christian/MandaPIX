@@ -963,7 +963,8 @@ function MandaPixApp() {
                 .select('current_bookings')
                 .eq('id', orderData.scheduleSlotId!)
                 .single()
-                .then(({ data: sd }) => {
+                .then((res: any) => {
+                  const sd = res.data;
                   if (sd) {
                     supabase
                       .from('schedule_slots')
@@ -1746,7 +1747,6 @@ function MandaPixApp() {
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     onSimulateStorefront={() => setIsStorefrontOpen(true)}
-                    availableSlots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
                   />
                 )}
 
@@ -1797,7 +1797,6 @@ function MandaPixApp() {
 
                 {activeSubTab === 'schedule' && (
                   <ScheduleManager
-                    storeId={activeStoreId!}
                     storeName={stores.find(s => s.id === activeStoreId)?.name || 'Minha Loja'}
                     calendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
                     slots={scheduleSlots.filter(s => s.storeId === activeStoreId)}

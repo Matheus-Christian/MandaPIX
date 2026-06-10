@@ -1,22 +1,20 @@
 import React, { useState } from 'react';
 import { ShoppingBag, Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock } from 'lucide-react';
 import { formatBRL } from '../utils/pix';
-import type { Order, ScheduleSlot } from '../utils/pix';
+import type { Order } from '../utils/pix';
 
 interface OrderManagerProps {
   orders: Order[];
   onCancelOrder: (id: string) => void;
   onUpdateOrderStatus: (id: string, status: Order['status']) => void;
   onSimulateStorefront: () => void;
-  availableSlots?: ScheduleSlot[];
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
   orders,
   onCancelOrder,
   onUpdateOrderStatus,
-  onSimulateStorefront,
-  availableSlots = []
+  onSimulateStorefront
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO'>('ALL');

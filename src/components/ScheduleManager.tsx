@@ -23,7 +23,6 @@ import {
 import type { ScheduleCalendar, ScheduleSlot, Catalog } from '../utils/pix';
 
 interface ScheduleManagerProps {
-  storeId: string;
   storeName: string;
   calendars: ScheduleCalendar[];
   slots: ScheduleSlot[];
@@ -64,14 +63,13 @@ interface CalendarListProps {
   calendars: ScheduleCalendar[];
   slots: ScheduleSlot[];
   catalogs: Catalog[];
-  storeName: string;
   onSelect: (cal: ScheduleCalendar) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
 }
 
 const CalendarList: React.FC<CalendarListProps> = ({
-  calendars, slots, catalogs, storeName, onSelect, onDelete, onCreate,
+  calendars, slots, catalogs, onSelect, onDelete, onCreate,
 }) => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -459,7 +457,7 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
             </button>
           </div>
           <div className="grid grid-cols-7 divide-x divide-slate-50 min-h-[240px]">
-            {weekDays.map((day, i) => {
+            {weekDays.map((day) => {
               const dateStr = formatDate(day);
               const daySlots = slotsByDate[dateStr] || [];
               const isToday = formatDate(new Date()) === dateStr;
@@ -681,7 +679,7 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
 // Main: ScheduleManager (orchestrator)
 // ─────────────────────────────────────────────────────────────
 export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
-  storeId, storeName, calendars, slots, catalogs,
+  storeName, calendars, slots, catalogs,
   onCreateCalendar, onUpdateCalendar, onDeleteCalendar,
   onAddSlot, onAddBulkSlots, onDeleteSlot, onToggleSlot,
 }) => {
@@ -728,7 +726,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           calendars={calendars}
           slots={slots}
           catalogs={catalogs}
-          storeName={storeName}
           onSelect={cal => setActiveCalendarId(cal.id)}
           onDelete={onDeleteCalendar}
           onCreate={() => setShowCreateModal(true)}

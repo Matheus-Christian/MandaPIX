@@ -51,9 +51,14 @@ export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   // Estados locais
-  const [activeTab, setActiveTab] = useState<'tenants' | 'plans' | 'routing'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'plans' | 'routing' | 'platform'>('tenants');
   const [tenants, setTenants] = useState<TenantProfile[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  
+  // Plataforma/Configurações
+  const [disableLanding, setDisableLanding] = useState(true);
+  const [loadingPlatform, setLoadingPlatform] = useState(false);
+  const [savingPlatform, setSavingPlatform] = useState(false);
   
   // Modais
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
@@ -198,6 +203,49 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Carregar configurações da plataforma (Página comercial ativa/inativa)
+  const loadPlatformSettings = async () => {
+    setLoadingPlatform(true);
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('key', 'disable_landing_page')
+        .single();
+      if (!error && data) {
+        setDisableLanding(!!data.value?.disabled);
+      } else {
+        setDisableLanding(true); // Default to disabled as requested by the user
+      }
+    } catch (err) {
+      console.error(err);
+      setDisableLanding(true);
+    } finally {
+      setLoadingPlatform(false);
+    }
+  };
+
+  const handleSavePlatform = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingPlatform(true);
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert({
+          key: 'disable_landing_page',
+          value: { disabled: disableLanding },
+          updated_at: new Date().toISOString()
+        });
+      if (error) throw error;
+      alert('Configuração da plataforma salva com sucesso!');
+      await loadPlatformSettings();
+    } catch (err: any) {
+      alert('Erro ao salvar: ' + err.message);
+    } finally {
+      setSavingPlatform(false);
+    }
+  };
+
   // Carregar dados
   const loadData = async () => {
     try {
@@ -240,6 +288,7 @@ export const AdminDashboard: React.FC = () => {
     if (user && profile?.role === 'admin') {
       loadData();
       loadRoutingSettings();
+      loadPlatformSettings();
     }
   }, [user, profile]);
 
@@ -512,6 +561,16 @@ export const AdminDashboard: React.FC = () => {
                 }`}
               >
                 Roteamento PIX
+              </button>
+              <button 
+                onClick={() => setActiveTab('platform')}
+                className={`py-4 px-2 border-b-2 font-bold text-xs uppercase tracking-wider transition-all ${
+                  activeTab === 'platform' 
+                    ? 'border-teal-500 text-teal-400' 
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Configurações da Plataforma
               </button>
             </div>
 
@@ -890,6 +949,72 @@ export const AdminDashboard: React.FC = () => {
                     )}
                   </button>
 
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* Conteúdo da Aba 4: Configurações da Plataforma */}
+          {activeTab === 'platform' && (
+            <div className="p-6">
+              {loadingPlatform ? (
+                <div className="text-center py-12 text-slate-500 space-y-2">
+                  <div className="w-8 h-8 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                  <p className="text-xs font-bold uppercase tracking-wider">Carregando configurações...</p>
+                </div>
+              ) : (
+                <form onSubmit={handleSavePlatform} className="space-y-6 max-w-2xl mx-auto">
+                  <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 space-y-6">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500 animate-pulse"></div>
+                      <h4 className="font-extrabold text-sm text-white uppercase tracking-wider">Página Comercial (Landing Page)</h4>
+                    </div>
+                    
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Defina se a página comercial de apresentação do MandaPIX ficará ativa no endereço raiz (<code className="text-teal-450 bg-slate-900 px-1 py-0.5 rounded font-mono font-bold">/</code>). Quando desativada, os usuários serão direcionados diretamente para a tela de login.
+                    </p>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status da Página</label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setDisableLanding(false)}
+                          className={`py-3 px-4 rounded-xl border font-bold text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 ${
+                            !disableLanding
+                              ? 'border-teal-500 bg-teal-500/10 text-teal-400'
+                              : 'border-slate-800 bg-slate-900/40 text-slate-450 hover:border-slate-700'
+                          }`}
+                        >
+                          <span className="font-extrabold text-white">Habilitada</span>
+                          <span className="text-[9px] font-medium text-slate-500 lowercase normal-case">Acessível publicamente em /</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setDisableLanding(true)}
+                          className={`py-3 px-4 rounded-xl border font-bold text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 ${
+                            disableLanding
+                              ? 'border-rose-500 bg-rose-500/10 text-rose-450'
+                              : 'border-slate-800 bg-slate-900/40 text-slate-450 hover:border-slate-700'
+                          }`}
+                        >
+                          <span className="font-extrabold text-white">Desabilitada</span>
+                          <span className="text-[9px] font-medium text-slate-550 lowercase normal-case">Redireciona direto para /login</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-850 flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={savingPlatform}
+                        className="bg-teal-500 hover:bg-teal-600 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider flex items-center gap-2 transition-all active:scale-95 shadow-md shadow-teal-500/10"
+                      >
+                        {savingPlatform ? 'Salvando...' : 'Salvar Configurações'}
+                      </button>
+                    </div>
+                  </div>
                 </form>
               )}
             </div>

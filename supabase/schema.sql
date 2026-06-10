@@ -427,6 +427,12 @@ INSERT INTO public.settings (key, value) VALUES (
   }'::jsonb
 ) ON CONFLICT (key) DO NOTHING;
 
+-- Seed inicial para desativar a página comercial por padrão
+INSERT INTO public.settings (key, value) VALUES (
+  'disable_landing_page',
+  '{"disabled": true}'::jsonb
+) ON CONFLICT (key) DO NOTHING;
+
 -- Adicionar colunas de controle de taxas e roteamento nas faturas e parcelas
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS routed_gateway TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS transaction_fee NUMERIC(10, 2);

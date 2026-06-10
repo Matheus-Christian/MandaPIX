@@ -67,6 +67,49 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   return children;
 };
 
+// Componente que decide se exibe a LandingPage ou se redireciona para o Login
+const LandingOrRedirect = () => {
+  const [loading, setLoading] = useState(true);
+  const [disableLanding, setDisableLanding] = useState(true);
+
+  useEffect(() => {
+    const checkSetting = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'disable_landing_page')
+          .single();
+        if (!error && data) {
+          setDisableLanding(!!data.value?.disabled);
+        } else {
+          setDisableLanding(true);
+        }
+      } catch (err) {
+        console.error(err);
+        setDisableLanding(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkSetting();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (disableLanding) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <LandingPage />;
+};
+
 // Componente principal do Tenant Workspace
 function MandaPixApp() {
   const { user, signOut } = useAuth();
@@ -1887,7 +1930,7 @@ export default function AppRouter() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<LandingOrRedirect />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />
           <Route path="/app" element={<PrivateRoute><MandaPixApp /></PrivateRoute>} />

@@ -167,11 +167,12 @@ function MandaPixApp() {
   };
 
   const loadScheduleData = async () => {
+    if (!user) return;
     try {
       const [calsRes, catLinksRes, slotsRes] = await Promise.all([
-        supabase.from('schedule_calendars').select('*').order('created_at'),
+        supabase.from('schedule_calendars').select('*').eq('tenant_id', user.id).order('created_at'),
         supabase.from('schedule_calendar_catalogs').select('*'),
-        supabase.from('schedule_slots').select('*').order('slot_date').order('slot_time')
+        supabase.from('schedule_slots').select('*').eq('tenant_id', user.id).order('slot_date').order('slot_time')
       ]);
       if (calsRes.data) {
         const catLinks: any[] = catLinksRes.data || [];
@@ -232,17 +233,21 @@ function MandaPixApp() {
   };
 
   const loadStores = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('stores')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setStores(data || []);
   };
   const loadClients = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('clients')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('name', { ascending: true });
     if (error) throw error;
     setClients((data || []).map((d: any) => ({
@@ -256,9 +261,11 @@ function MandaPixApp() {
   };
 
   const loadCatalogs = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('catalogs')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setCatalogs((data || []).map((d: any) => ({
@@ -270,9 +277,11 @@ function MandaPixApp() {
   };
 
   const loadProducts = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('products')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('name', { ascending: true });
     if (error) throw error;
     setProducts((data || []).map((d: any) => ({
@@ -286,9 +295,11 @@ function MandaPixApp() {
   };
 
   const loadWallets = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('wallets')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('is_primary', { ascending: false });
     if (error) throw error;
     setSavedKeys((data || []).map((d: any) => ({
@@ -307,9 +318,11 @@ function MandaPixApp() {
   };
 
   const loadInvoices = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('invoices')
       .select('*, installments(*)')
+      .eq('tenant_id', user.id)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setInvoices((data || []).map((d: any) => ({
@@ -343,9 +356,11 @@ function MandaPixApp() {
   };
 
   const loadOrders = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('orders')
       .select('*')
+      .eq('tenant_id', user.id)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setOrders((data || []).map((d: any) => ({

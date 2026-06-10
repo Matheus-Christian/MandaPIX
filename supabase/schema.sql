@@ -429,3 +429,88 @@ ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS transaction_fee NUMERIC(10,
 ALTER TABLE public.installments ADD COLUMN IF NOT EXISTS routed_gateway TEXT;
 ALTER TABLE public.installments ADD COLUMN IF NOT EXISTS transaction_fee NUMERIC(10, 2);
 
+-- ==========================================
+-- SCHEDULING / AGENDAMENTO DE PEDIDOS
+-- ==========================================
+
+-- (Remove tabela antiga de config por loja, se existir)
+DROP TABLE IF EXISTS public.store_schedule_configs CASCADE;
+
+-- Calendários de agendamento (uma loja pode ter múltiplos calendários)
+CREATE TABLE IF NOT EXISTS public.schedule_calendars (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  is_enabled BOOLEAN NOT NULL DEFAULT false,
+  show_slots_to_client BOOLEAN NOT NULL DEFAULT false,
+  require_scheduling BOOLEAN NOT NULL DEFAULT false,
+  advance_days INTEGER NOT NULL DEFAULT 7,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.schedule_calendars ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants gerenciam seus calendários de agendamento"
+  ON public.schedule_calendars FOR ALL
+  USING (auth.uid() = tenant_id);
+
+CREATE POLICY "Leitura pública de calendários de agendamento"
+  ON public.schedule_calendars FOR SELECT
+  USING (true);
+
+-- Associação N:N entre calendários e catálogos
+CREATE TABLE IF NOT EXISTS public.schedule_calendar_catalogs (
+  calendar_id UUID NOT NULL REFERENCES public.schedule_calendars(id) ON DELETE CASCADE,
+  catalog_id UUID NOT NULL REFERENCES public.catalogs(id) ON DELETE CASCADE,
+  PRIMARY KEY (calendar_id, catalog_id)
+);
+
+ALTER TABLE public.schedule_calendar_catalogs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Leitura pública das associações calendário-catálogo"
+  ON public.schedule_calendar_catalogs FOR SELECT
+  USING (true);
+
+CREATE POLICY "Tenants gerenciam associações calendário-catálogo"
+  ON public.schedule_calendar_catalogs FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.schedule_calendars sc
+      WHERE sc.id = calendar_id AND sc.tenant_id = auth.uid()
+    )
+  );
+
+-- Slots de horário disponíveis (vinculados a um calendário)
+CREATE TABLE IF NOT EXISTS public.schedule_slots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  calendar_id UUID NOT NULL REFERENCES public.schedule_calendars(id) ON DELETE CASCADE,
+  store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  slot_date DATE NOT NULL,
+  slot_time TIME NOT NULL,
+  max_capacity INTEGER NOT NULL DEFAULT 1,
+  current_bookings INTEGER NOT NULL DEFAULT 0,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (calendar_id, slot_date, slot_time)
+);
+
+ALTER TABLE public.schedule_slots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants gerenciam seus slots de agendamento"
+  ON public.schedule_slots FOR ALL
+  USING (auth.uid() = tenant_id);
+
+CREATE POLICY "Leitura pública de slots para clientes"
+  ON public.schedule_slots FOR SELECT
+  USING (true);
+
+-- Adicionar campos de agendamento na tabela de pedidos
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS schedule_slot_id UUID REFERENCES public.schedule_slots(id) ON DELETE SET NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS schedule_calendar_id UUID REFERENCES public.schedule_calendars(id) ON DELETE SET NULL;
+
+
+

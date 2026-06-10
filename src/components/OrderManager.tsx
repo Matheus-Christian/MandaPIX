@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package } from 'lucide-react';
+import { ShoppingBag, Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock } from 'lucide-react';
 import { formatBRL } from '../utils/pix';
-import type { Order } from '../utils/pix';
+import type { Order, ScheduleSlot } from '../utils/pix';
 
 interface OrderManagerProps {
   orders: Order[];
   onCancelOrder: (id: string) => void;
   onUpdateOrderStatus: (id: string, status: Order['status']) => void;
   onSimulateStorefront: () => void;
+  availableSlots?: ScheduleSlot[];
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
@@ -15,6 +16,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   onCancelOrder,
   onUpdateOrderStatus,
   onSimulateStorefront,
+  availableSlots = []
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO'>('ALL');
@@ -175,6 +177,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     <th className="py-3 px-4">Pedido</th>
                     <th className="py-3 px-4">Cliente</th>
                     <th className="py-3 px-4">Data</th>
+                    <th className="py-3 px-4">Agendado para</th>
                     <th className="py-3 px-4">Total</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-center">Ações</th>
@@ -204,6 +207,20 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                         </td>
                         <td className="py-3.5 px-4 text-slate-400">
                           {new Date(order.dateCreated).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {order.scheduledAt ? (
+                            <div className="flex items-center gap-1 text-pix font-bold">
+                              <CalendarClock className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="text-[10px]">
+                                {new Date(order.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                {' '}
+                                {new Date(order.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 font-bold">—</span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 font-extrabold text-slate-800">
                           {formatBRL(order.totalAmount)}
@@ -291,6 +308,24 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   </p>
                 </div>
               </div>
+
+              {/* Scheduling info in modal */}
+              {selectedOrder.scheduledAt && (
+                <div className="bg-pix-light border border-pix/20 rounded-2xl p-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-pix flex items-center justify-center flex-shrink-0">
+                    <CalendarClock className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-pix uppercase tracking-wide">Pedido Agendado</p>
+                    <p className="text-xs font-bold text-slate-800 mt-0.5">
+                      {new Date(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                    </p>
+                    <p className="text-[10px] text-slate-500 font-semibold">
+                      {new Date(selectedOrder.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* TIMELINE VISUAL STEPPER */}
               {(() => {

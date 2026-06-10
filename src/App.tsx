@@ -16,7 +16,8 @@ import {
   ShoppingBag, 
   ShoppingCart, 
   Wallet as WalletIcon,
-  LogOut
+  LogOut,
+  CalendarClock
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -31,7 +32,7 @@ import {
   generatePixPayload,
   routePixPayment
 } from './utils/pix';
-import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order } from './utils/pix';
+import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar } from './utils/pix';
 
 import { VirtualCard } from './components/VirtualCard';
 import { ClientManager } from './components/ClientManager';
@@ -41,6 +42,7 @@ import { SavedKeys } from './components/SavedKeys';
 import { StoreManager } from './components/StoreManager';
 import { OrderManager } from './components/OrderManager';
 import { StorefrontSimulator } from './components/StorefrontSimulator';
+import { ScheduleManager } from './components/ScheduleManager';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
@@ -76,7 +78,11 @@ function MandaPixApp() {
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule'>('orders');
+
+  // Schedule states
+  const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
+  const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [isStorefrontOpen, setIsStorefrontOpen] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -107,12 +113,50 @@ function MandaPixApp() {
         loadWallets(),
         loadInvoices(),
         loadOrders(),
-        loadRoutingSettings()
+        loadRoutingSettings(),
+        loadScheduleData()
       ]);
     } catch (err) {
       console.error('Erro ao carregar dados do Supabase:', err);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  const loadScheduleData = async () => {
+    try {
+      const [calsRes, catLinksRes, slotsRes] = await Promise.all([
+        supabase.from('schedule_calendars').select('*').order('created_at'),
+        supabase.from('schedule_calendar_catalogs').select('*'),
+        supabase.from('schedule_slots').select('*').order('slot_date').order('slot_time')
+      ]);
+      if (calsRes.data) {
+        const catLinks: any[] = catLinksRes.data || [];
+        setScheduleCalendars(calsRes.data.map((d: any) => ({
+          id: d.id,
+          storeId: d.store_id,
+          name: d.name,
+          catalogIds: catLinks.filter(l => l.calendar_id === d.id).map((l: any) => l.catalog_id),
+          isEnabled: d.is_enabled,
+          showSlotsToClient: d.show_slots_to_client,
+          requireScheduling: d.require_scheduling,
+          advanceDays: d.advance_days,
+        })));
+      }
+      if (slotsRes.data) {
+        setScheduleSlots(slotsRes.data.map((d: any) => ({
+          id: d.id,
+          calendarId: d.calendar_id,
+          storeId: d.store_id,
+          slotDate: d.slot_date,
+          slotTime: d.slot_time.substring(0, 5),
+          maxCapacity: d.max_capacity,
+          currentBookings: d.current_bookings,
+          isEnabled: d.is_enabled,
+        })));
+      }
+    } catch (err) {
+      console.warn('Schedule tables may not exist yet:', err);
     }
   };
 
@@ -273,9 +317,156 @@ function MandaPixApp() {
       totalAmount: Number(d.total_amount),
       status: d.status,
       dateCreated: d.date_created,
-      invoiceId: d.invoice_id
+      invoiceId: d.invoice_id,
+      scheduledAt: d.scheduled_at || undefined,
+      scheduleSlotId: d.schedule_slot_id || undefined,
     })));
-  };;
+  };
+
+  // ==========================================
+  // SCHEDULE CALENDAR HANDLERS
+  // ==========================================
+
+  const handleCreateScheduleCalendar = async ({ name, catalogIds }: { name: string; catalogIds: string[] }) => {
+    try {
+      const { data, error } = await supabase
+        .from('schedule_calendars')
+        .insert([{
+          store_id: activeStoreId,
+          name,
+          is_enabled: false,
+          show_slots_to_client: false,
+          require_scheduling: false,
+          advance_days: 7,
+        }])
+        .select()
+        .single();
+      if (error) throw error;
+
+      if (catalogIds.length > 0) {
+        await supabase
+          .from('schedule_calendar_catalogs')
+          .insert(catalogIds.map(cid => ({ calendar_id: data.id, catalog_id: cid })));
+      }
+
+      await loadScheduleData();
+    } catch (err) {
+      console.error('Erro ao criar calendário:', err);
+    }
+  };
+
+  const handleUpdateScheduleCalendar = async (calendar: ScheduleCalendar) => {
+    try {
+      await supabase
+        .from('schedule_calendars')
+        .update({
+          name: calendar.name,
+          is_enabled: calendar.isEnabled,
+          show_slots_to_client: calendar.showSlotsToClient,
+          require_scheduling: calendar.requireScheduling,
+          advance_days: calendar.advanceDays,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', calendar.id);
+
+      // Sync catalog associations: delete all then re-insert
+      await supabase.from('schedule_calendar_catalogs').delete().eq('calendar_id', calendar.id);
+      if (calendar.catalogIds.length > 0) {
+        await supabase
+          .from('schedule_calendar_catalogs')
+          .insert(calendar.catalogIds.map(cid => ({ calendar_id: calendar.id, catalog_id: cid })));
+      }
+
+      setScheduleCalendars(prev => prev.map(c => c.id === calendar.id ? calendar : c));
+    } catch (err) {
+      console.error('Erro ao atualizar calendário:', err);
+    }
+  };
+
+  const handleDeleteScheduleCalendar = async (calendarId: string) => {
+    try {
+      const { error } = await supabase.from('schedule_calendars').delete().eq('id', calendarId);
+      if (error) throw error;
+      setScheduleCalendars(prev => prev.filter(c => c.id !== calendarId));
+      setScheduleSlots(prev => prev.filter(s => s.calendarId !== calendarId));
+    } catch (err) {
+      console.error('Erro ao excluir calendário:', err);
+    }
+  };
+
+  const handleAddScheduleSlot = async (slot: Omit<ScheduleSlot, 'id' | 'currentBookings'>) => {
+    try {
+      const { data, error } = await supabase
+        .from('schedule_slots')
+        .insert([{
+          calendar_id: slot.calendarId,
+          store_id: slot.storeId,
+          slot_date: slot.slotDate,
+          slot_time: slot.slotTime,
+          max_capacity: slot.maxCapacity,
+          is_enabled: slot.isEnabled,
+        }])
+        .select()
+        .single();
+      if (error) throw error;
+      setScheduleSlots(prev => [
+        ...prev,
+        {
+          id: data.id,
+          calendarId: data.calendar_id,
+          storeId: data.store_id,
+          slotDate: data.slot_date,
+          slotTime: data.slot_time.substring(0, 5),
+          maxCapacity: data.max_capacity,
+          currentBookings: data.current_bookings,
+          isEnabled: data.is_enabled,
+        }
+      ]);
+    } catch (err: any) {
+      console.error('Erro ao adicionar slot:', err);
+      if (err.code === '23505') alert('Já existe um slot para este horário nesta data neste calendário.');
+    }
+  };
+
+  const handleAddBulkScheduleSlots = async (slots: Array<Omit<ScheduleSlot, 'id' | 'currentBookings'>>) => {
+    try {
+      const toInsert = slots.map(s => ({
+        calendar_id: s.calendarId,
+        store_id: s.storeId,
+        slot_date: s.slotDate,
+        slot_time: s.slotTime,
+        max_capacity: s.maxCapacity,
+        is_enabled: s.isEnabled,
+      }));
+      const { error } = await supabase
+        .from('schedule_slots')
+        .upsert(toInsert, { onConflict: 'calendar_id,slot_date,slot_time', ignoreDuplicates: true });
+      if (error) throw error;
+      await loadScheduleData();
+    } catch (err) {
+      console.error('Erro ao criar slots em lote:', err);
+    }
+  };
+
+  const handleDeleteScheduleSlot = async (slotId: string) => {
+    try {
+      const { error } = await supabase.from('schedule_slots').delete().eq('id', slotId);
+      if (error) throw error;
+      setScheduleSlots(prev => prev.filter(s => s.id !== slotId));
+    } catch (err) {
+      console.error('Erro ao excluir slot:', err);
+    }
+  };
+
+  const handleToggleScheduleSlot = async (slotId: string, isEnabled: boolean) => {
+    try {
+      const { error } = await supabase.from('schedule_slots').update({ is_enabled: isEnabled }).eq('id', slotId);
+      if (error) throw error;
+      setScheduleSlots(prev => prev.map(s => s.id === slotId ? { ...s, isEnabled } : s));
+    } catch (err) {
+      console.error('Erro ao alternar slot:', err);
+    }
+  };
 
   useEffect(() => {
     loadAllData();
@@ -650,6 +841,8 @@ function MandaPixApp() {
     clientPhone: string;
     items: Array<{ productServiceId: string; quantity: number }>;
     paymentMethod?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
+    scheduledAt?: string;
+    scheduleSlotId?: string;
   }) => {
     try {
       const method = orderData.paymentMethod || 'PIX';
@@ -750,11 +943,37 @@ function MandaPixApp() {
             })
             .eq('id', instData.id);
 
-          // Atualizar pedido total_amount
+          // Atualizar pedido total_amount e agendamento
+          const orderUpdate: any = { total_amount: finalTotal };
+          if (orderData.scheduledAt) {
+            orderUpdate.scheduled_at = orderData.scheduledAt;
+            orderUpdate.schedule_slot_id = orderData.scheduleSlotId || null;
+          }
           await supabase
             .from('orders')
-            .update({ total_amount: finalTotal })
+            .update(orderUpdate)
             .eq('invoice_id', data.invoiceId);
+
+          // Increment slot bookings if scheduled
+          if (orderData.scheduleSlotId) {
+            await supabase.rpc('increment_slot_booking', { slot_id: orderData.scheduleSlotId }).catch(() => {
+              // Fallback: manual increment
+              supabase
+                .from('schedule_slots')
+                .select('current_bookings')
+                .eq('id', orderData.scheduleSlotId!)
+                .single()
+                .then(({ data: sd }) => {
+                  if (sd) {
+                    supabase
+                      .from('schedule_slots')
+                      .update({ current_bookings: sd.current_bookings + 1 })
+                      .eq('id', orderData.scheduleSlotId!);
+                  }
+                });
+            });
+            await loadScheduleData();
+          }
         }
       }
 
@@ -1490,12 +1709,13 @@ function MandaPixApp() {
                       </select>
                     </div>
 
-                    <div className="flex px-5 bg-white">
+                    <div className="flex px-5 bg-white overflow-x-auto">
                       {([
                         { id: 'orders', label: 'Pedidos', icon: ShoppingCart },
-                        { id: 'invoices', label: 'Cobranças', icon: History },
+                        { id: 'invoices', label: 'Gerenciar vendas', icon: History },
                         { id: 'clients', label: 'Clientes', icon: Users },
-                        { id: 'catalogs', label: 'Catálogos', icon: FolderOpen }
+                        { id: 'catalogs', label: 'Catálogos', icon: FolderOpen },
+                        { id: 'schedule', label: 'Agendamento', icon: CalendarClock }
                       ] as const).map(subTab => {
                         const Icon = subTab.icon;
                         const isSubActive = activeSubTab === subTab.id;
@@ -1526,6 +1746,7 @@ function MandaPixApp() {
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     onSimulateStorefront={() => setIsStorefrontOpen(true)}
+                    availableSlots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
                   />
                 )}
 
@@ -1573,6 +1794,23 @@ function MandaPixApp() {
                     onDeleteProduct={handleDeleteProduct}
                   />
                 )}
+
+                {activeSubTab === 'schedule' && (
+                  <ScheduleManager
+                    storeId={activeStoreId!}
+                    storeName={stores.find(s => s.id === activeStoreId)?.name || 'Minha Loja'}
+                    calendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
+                    slots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
+                    catalogs={catalogs.filter(c => c.storeId === activeStoreId)}
+                    onCreateCalendar={handleCreateScheduleCalendar}
+                    onUpdateCalendar={handleUpdateScheduleCalendar}
+                    onDeleteCalendar={handleDeleteScheduleCalendar}
+                    onAddSlot={handleAddScheduleSlot}
+                    onAddBulkSlots={handleAddBulkScheduleSlots}
+                    onDeleteSlot={handleDeleteScheduleSlot}
+                    onToggleSlot={handleToggleScheduleSlot}
+                  />
+                )}
               </div>
             </div>
           )
@@ -1602,6 +1840,8 @@ function MandaPixApp() {
           }}
           routingSettings={routingSettings}
           merchantWallets={savedKeys}
+          scheduleCalendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
+          availableSlots={scheduleSlots.filter(s => s.storeId === activeStoreId && s.isEnabled)}
         />
       )}
 

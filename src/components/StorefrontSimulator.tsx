@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingBag, ShoppingCart, Trash2, Plus, Minus, X, Check, Copy, AlertCircle, CreditCard } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ShoppingBag, ShoppingCart, Trash2, Plus, Minus, X, Check, Copy, AlertCircle, CreditCard, CalendarClock, Clock, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatBRL, routePixPayment } from '../utils/pix';
-import type { Store, Catalog, ProductService, SavedPixKey } from '../utils/pix';
+import type { Store, Catalog, ProductService, SavedPixKey, ScheduleSlot, ScheduleCalendar } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
 interface StorefrontSimulatorProps {
@@ -15,6 +15,8 @@ interface StorefrontSimulatorProps {
     clientPhone: string;
     items: Array<{ productServiceId: string; quantity: number }>;
     paymentMethod?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
+    scheduledAt?: string;
+    scheduleSlotId?: string;
   }) => Promise<{ 
     orderNumber: string; 
     pixPayload: string; 
@@ -26,6 +28,8 @@ interface StorefrontSimulatorProps {
   onSimulatePayment: (invoiceId: string) => void;
   routingSettings?: any;
   merchantWallets?: SavedPixKey[];
+  scheduleCalendars?: ScheduleCalendar[];
+  availableSlots?: ScheduleSlot[];
 }
 
 interface CartItem {
@@ -41,7 +45,9 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
   onClose,
   onSimulatePayment,
   routingSettings,
-  merchantWallets
+  merchantWallets,
+  scheduleCalendars = [],
+  availableSlots = []
 }) => {
   // Navigation & Category Selection
   const [selectedCatalogId, setSelectedCatalogId] = useState<string>('ALL');
@@ -65,6 +71,11 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
   const [cardCvv, setCardCvv] = useState('');
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+
+  // Scheduling state
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [scheduleWeekOffset, setScheduleWeekOffset] = useState(0);
   
   // Success / Payment Modal State
   const [checkoutResult, setCheckoutResult] = useState<{
@@ -176,6 +187,12 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
       return;
     }
 
+    // Schedule validation
+    if (scheduleConfig?.isEnabled && scheduleConfig.requireScheduling && !selectedSlotId) {
+      setFormErrors(prev => ({ ...prev, schedule: 'Por favor, selecione um horário de agendamento para continuar.' }));
+      return;
+    }
+
     try {
       setIsProcessingCheckout(true);
       const items = cart.map(item => ({
@@ -192,7 +209,15 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
         clientEmail: email.trim(),
         clientPhone: phone.trim(),
         items,
-        paymentMethod
+        paymentMethod,
+        scheduledAt: selectedSlotId
+          ? (() => {
+              const slot = availableSlots.find(s => s.id === selectedSlotId);
+              if (!slot) return undefined;
+              return `${slot.slotDate}T${slot.slotTime}:00`;
+            })()
+          : undefined,
+        scheduleSlotId: selectedSlotId || undefined,
       });
 
       setCheckoutResult(res);
@@ -301,6 +326,77 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
     onSimulatePayment(checkoutResult.invoiceId);
     setIsPaymentSimulated(true);
   };
+
+  // Scheduling helpers — derive active calendar from cart items' catalog IDs
+  const scheduleEnabled = useMemo(() => {
+    if (scheduleCalendars.length === 0 || cart.length === 0) return false;
+    // Find which catalog IDs are in the cart
+    const cartCatalogIds = new Set(
+      cart.map(item => item.product.catalogId).filter(Boolean)
+    );
+    return scheduleCalendars.some(
+      cal => cal.isEnabled && cal.catalogIds.some(cid => cartCatalogIds.has(cid))
+    );
+  }, [scheduleCalendars, cart]);
+
+  const activeCalendar = useMemo(() => {
+    if (cart.length === 0) return null;
+    const cartCatalogIds = new Set(
+      cart.map(item => item.product.catalogId).filter(Boolean)
+    );
+    return scheduleCalendars.find(
+      cal => cal.isEnabled && cal.catalogIds.some(cid => cartCatalogIds.has(cid))
+    ) || null;
+  }, [scheduleCalendars, cart]);
+
+  // Legacy compat: expose scheduleConfig shape from active calendar
+  const scheduleConfig = activeCalendar ? {
+    isEnabled: activeCalendar.isEnabled,
+    showSlotsToClient: activeCalendar.showSlotsToClient,
+    requireScheduling: activeCalendar.requireScheduling,
+    advanceDays: activeCalendar.advanceDays,
+  } : null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const weekStart = useMemo(() => {
+    const dow = today.getDay();
+    const mon = new Date(today);
+    mon.setDate(today.getDate() - dow + (dow === 0 ? -6 : 1));
+    const result = new Date(mon);
+    result.setDate(mon.getDate() + scheduleWeekOffset * 7);
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleWeekOffset]);
+
+  const scheduleWeekDays = useMemo(() =>
+    Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + i);
+      return d;
+    }),
+    [weekStart]
+  );
+
+  const slotsByDate = useMemo(() => {
+    const map: Record<string, ScheduleSlot[]> = {};
+    const cutoff = new Date(today);
+    cutoff.setDate(today.getDate() + (scheduleConfig?.advanceDays || 30));
+    availableSlots
+      .filter(s => {
+        const d = new Date(s.slotDate + 'T12:00:00');
+        return d >= today && d <= cutoff && s.isEnabled && s.currentBookings < s.maxCapacity;
+      })
+      .forEach(s => {
+        if (!map[s.slotDate]) map[s.slotDate] = [];
+        map[s.slotDate].push(s);
+      });
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableSlots, scheduleConfig]);
+
+  const selectedSlot = availableSlots.find(s => s.id === selectedSlotId);
 
   const getActiveWallet = (method: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD') => {
     if (!merchantWallets || merchantWallets.length === 0) return null;
@@ -609,9 +705,147 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
                         </div>
                       </div>
 
+                      {/* Scheduling Picker — shown when enabled by tenant */}
+                      {scheduleEnabled && (
+                        <div className={`border rounded-2xl overflow-hidden transition-all ${formErrors.schedule ? 'border-red-300' : 'border-slate-200'}`}>
+                          <div className="bg-slate-50 px-3 py-2 flex items-center justify-between border-b border-slate-100">
+                            <div className="flex items-center gap-1.5">
+                              <CalendarClock className="w-3.5 h-3.5 text-pix" />
+                              <span className="text-[10px] font-black uppercase text-slate-500 tracking-wide">
+                                Agendamento {scheduleConfig?.requireScheduling ? <span className="text-red-500">*</span> : <span className="text-slate-400">(opcional)</span>}
+                              </span>
+                            </div>
+                            {selectedSlot && (
+                              <button
+                                type="button"
+                                onClick={() => { setSelectedSlotId(null); setSelectedDate(null); }}
+                                className="text-[9px] text-slate-400 hover:text-red-500 font-bold transition-colors"
+                              >
+                                Limpar
+                              </button>
+                            )}
+                          </div>
+
+                          {selectedSlot ? (
+                            <div className="p-3 bg-pix-light flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-xl bg-pix flex items-center justify-center flex-shrink-0">
+                                <CalendarClock className="w-4 h-4 text-white" />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-black text-pix uppercase tracking-wide">Agendado</p>
+                                <p className="text-xs font-bold text-slate-800">
+                                  {new Date(selectedSlot.slotDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })} às {selectedSlot.slotTime}
+                                </p>
+                                {scheduleConfig?.showSlotsToClient && (
+                                  <p className="text-[9px] text-slate-500 mt-0.5">
+                                    {selectedSlot.maxCapacity - selectedSlot.currentBookings} vaga(s) disponível
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-2 space-y-2">
+                              {/* Week navigator */}
+                              <div className="flex items-center justify-between px-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleWeekOffset(w => Math.max(0, w - 1))}
+                                  disabled={scheduleWeekOffset === 0}
+                                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 disabled:opacity-30 transition-all"
+                                >
+                                  <ChevronLeft className="w-3.5 h-3.5" />
+                                </button>
+                                <span className="text-[9px] font-bold text-slate-500">
+                                  {scheduleWeekDays[0].toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} — {scheduleWeekDays[6].toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleWeekOffset(w => w + 1)}
+                                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 transition-all"
+                                >
+                                  <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* Day pills */}
+                              <div className="grid grid-cols-7 gap-0.5">
+                                {scheduleWeekDays.map(day => {
+                                  const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+                                  const daySlots = slotsByDate[dateStr] || [];
+                                  const hasSlots = daySlots.length > 0;
+                                  const isSelected = selectedDate === dateStr;
+                                  const isPast = day < new Date(new Date().setHours(0,0,0,0));
+                                  return (
+                                    <button
+                                      key={dateStr}
+                                      type="button"
+                                      disabled={!hasSlots || isPast}
+                                      onClick={() => { setSelectedDate(isSelected ? null : dateStr); setSelectedSlotId(null); }}
+                                      className={`flex flex-col items-center py-1.5 rounded-lg transition-all text-[9px] font-bold border ${
+                                        isPast || !hasSlots
+                                          ? 'opacity-30 cursor-not-allowed border-transparent text-slate-400'
+                                          : isSelected
+                                          ? 'bg-pix border-pix text-white shadow-sm'
+                                          : 'bg-slate-50 border-slate-100 text-slate-600 hover:border-pix/40 hover:text-pix'
+                                      }`}
+                                    >
+                                      <span className="uppercase">{['D','S','T','Q','Q','S','S'][day.getDay()]}</span>
+                                      <span className="font-black text-sm leading-tight">{day.getDate()}</span>
+                                      {hasSlots && !isPast && (
+                                        <span className={`w-1 h-1 rounded-full mt-0.5 ${isSelected ? 'bg-white' : 'bg-pix'}`} />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Time slots for selected day */}
+                              {selectedDate && slotsByDate[selectedDate] && (
+                                <div className="space-y-1 pt-1 border-t border-slate-100">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide px-1">Horários disponíveis</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {slotsByDate[selectedDate].map(slot => {
+                                      const remaining = slot.maxCapacity - slot.currentBookings;
+                                      return (
+                                        <button
+                                          key={slot.id}
+                                          type="button"
+                                          onClick={() => setSelectedSlotId(slot.id)}
+                                          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all ${
+                                            selectedSlotId === slot.id
+                                              ? 'bg-pix border-pix text-white shadow-sm'
+                                              : 'bg-white border-slate-200 text-slate-600 hover:border-pix hover:text-pix'
+                                          }`}
+                                        >
+                                          <Clock className="w-2.5 h-2.5" />
+                                          {slot.slotTime}
+                                          {scheduleConfig?.showSlotsToClient && (
+                                            <span className={`flex items-center gap-0.5 text-[8px] ${selectedSlotId === slot.id ? 'text-white/80' : 'text-slate-400'}`}>
+                                              <Users className="w-2 h-2" />{remaining}
+                                            </span>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {!selectedDate && Object.keys(slotsByDate).length === 0 && (
+                                <p className="text-center text-[10px] text-slate-400 py-2 font-semibold">Nenhum horário disponível no momento.</p>
+                              )}
+                            </div>
+                          )}
+                          {formErrors.schedule && (
+                            <p className="text-red-500 text-[9px] px-3 pb-2 font-bold">{formErrors.schedule}</p>
+                          )}
+                        </div>
+                      )}
+
                       {/* Payment Method Selector */}
                       <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Forma de Pagamento</label>
+
                         <div className="grid grid-cols-3 gap-2 mb-2">
                           {(['PIX', 'CREDIT_CARD', 'DEBIT_CARD'] as const).map((method) => (
                             <button

@@ -674,7 +674,45 @@ export interface Order {
   status: 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO';
   dateCreated: string;
   invoiceId?: string; // Links to invoice
+  scheduledAt?: string; // ISO datetime string for scheduled appointment
+  scheduleSlotId?: string; // Reference to the schedule_slots row
 }
+
+// ==========================================
+// SCHEDULING TYPES
+// ==========================================
+
+/**
+ * A named scheduling calendar belonging to a store.
+ * A store can have multiple calendars, each linked to one or more catalogs.
+ */
+export interface ScheduleCalendar {
+  id: string;
+  storeId: string;
+  name: string;                    // e.g. "Aline Lima Beauty – Atendimento"
+  catalogIds: string[];            // Associated catalog IDs
+  isEnabled: boolean;              // Habilita o módulo de agendamento neste calendário
+  showSlotsToClient: boolean;      // Exibe vagas disponíveis para o cliente final
+  requireScheduling: boolean;      // Torna seleção de slot obrigatória no pedido
+  advanceDays: number;             // Janela de dias futuros disponíveis para agendar
+}
+
+export interface ScheduleSlot {
+  id: string;
+  calendarId: string;              // References ScheduleCalendar
+  storeId: string;                 // Denormalized for easy filtering
+  slotDate: string;                // YYYY-MM-DD
+  slotTime: string;                // HH:MM
+  maxCapacity: number;
+  currentBookings: number;
+  isEnabled: boolean;
+}
+
+// Legacy alias kept for backward compat inside StorefrontSimulator
+export type ScheduleConfig = Pick<ScheduleCalendar,
+  'isEnabled' | 'showSlotsToClient' | 'requireScheduling' | 'advanceDays'
+>;
+
 
 export const DEFAULT_ORDERS: Order[] = [
   {

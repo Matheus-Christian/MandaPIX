@@ -273,7 +273,60 @@ export const formatCurrencyInput = (value: string): string => {
   });
 };
 
-export type WalletType = 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
+export type WalletType = 'PIX' | 'PIX_AUTO' | 'CREDIT_CARD' | 'DEBIT_CARD';
+
+export interface PixRoutingGateway {
+  fixed: number;
+  percent: number;
+  key: string;
+}
+
+export interface PixRoutingSettings {
+  threshold: number;
+  below: {
+    asaas: PixRoutingGateway;
+    efi: PixRoutingGateway;
+  };
+  above: {
+    asaas: PixRoutingGateway;
+    efi: PixRoutingGateway;
+  };
+}
+
+export interface RoutedPayment {
+  gateway: 'Asaas' | 'Efí';
+  fee: number;
+  key: string;
+  total: number;
+}
+
+export function routePixPayment(amount: number, settings: PixRoutingSettings): RoutedPayment {
+  const threshold = settings?.threshold ?? 100;
+  const isBelow = amount < threshold;
+  const rates = isBelow ? settings?.below : settings?.above;
+
+  const asaasFixed = rates?.asaas?.fixed ?? 0.99;
+  const asaasPercent = rates?.asaas?.percent ?? 0;
+  const asaasKey = rates?.asaas?.key || 'asaas-default@mandapix.com';
+
+  const efiFixed = rates?.efi?.fixed ?? 0;
+  const efiPercent = rates?.efi?.percent ?? 1.19;
+  const efiKey = rates?.efi?.key || 'efi-default@mandapix.com';
+
+  const asaasCost = asaasFixed + (amount * asaasPercent / 100);
+  const efiCost = efiFixed + (amount * efiPercent / 100);
+
+  const cheapest = asaasCost <= efiCost ? 'asaas' : 'efi';
+  const fee = cheapest === 'asaas' ? asaasCost : efiCost;
+  const routedKey = cheapest === 'asaas' ? asaasKey : efiKey;
+
+  return {
+    gateway: cheapest === 'asaas' ? 'Asaas' : 'Efí',
+    fee: parseFloat(fee.toFixed(2)),
+    key: routedKey,
+    total: parseFloat((amount + fee).toFixed(2))
+  };
+}
 
 export interface Wallet {
   id: string;
@@ -307,6 +360,17 @@ export const BANKS = [
 ];
 
 export const DEFAULT_KEYS: SavedPixKey[] = [
+  {
+    id: 'key-default-auto',
+    walletType: 'PIX_AUTO',
+    type: 'RANDOM',
+    key: 'automatico',
+    name: 'Roteamento MandaPIX',
+    city: 'SAO PAULO',
+    label: 'PIX Automatizado + Taxas',
+    bankName: 'MandaPIX',
+    isPrimary: false,
+  },
   {
     id: 'key-default-1',
     walletType: 'PIX',

@@ -28,6 +28,9 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
 
   const getBankGradient = (wallet?: SavedPixKey) => {
     if (!wallet) return 'from-teal-600 via-pix to-emerald-700';
+    if (wallet.walletType === 'PIX_AUTO') {
+      return 'from-cyan-800 via-cyan-900 to-slate-950';
+    }
     if (wallet.walletType !== 'PIX') {
       if (wallet.cardProvider === 'Stripe') return 'from-indigo-950 via-slate-900 to-indigo-900';
       if (wallet.cardProvider === 'Mercado Pago') return 'from-blue-600 via-sky-600 to-blue-800';
@@ -49,7 +52,7 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
       
       {/* Hologram Card Overlay effect */}
       <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0)_30%,rgba(255,255,255,0.08)_40%,rgba(255,255,255,0.18)_45%,rgba(255,255,255,0.08)_50%,rgba(255,255,255,0)_60%)] -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-out z-0" />
-
+ 
       {primaryKey ? (
         <div className="relative h-full flex flex-col justify-between z-10">
           {/* Card Top Row */}
@@ -58,6 +61,8 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
               <span className="text-[10px] uppercase tracking-widest text-white/60 font-semibold">
                 {primaryKey.walletType === 'PIX'
                   ? 'Chave Principal'
+                  : primaryKey.walletType === 'PIX_AUTO'
+                  ? 'PIX Auto + Taxas'
                   : primaryKey.walletType === 'CREDIT_CARD'
                   ? 'Carteira Crédito'
                   : 'Carteira Débito'}
@@ -69,7 +74,7 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
             <div className="flex items-center gap-3">
               <Wifi className="w-5 h-5 text-white/40 rotate-90" />
               <div className="text-white flex items-center justify-center p-1 bg-white/10 rounded-lg backdrop-blur-sm border border-white/10">
-                {primaryKey.walletType === 'PIX' ? (
+                {primaryKey.walletType === 'PIX' || primaryKey.walletType === 'PIX_AUTO' ? (
                   <PixIcon className="w-5 h-5" />
                 ) : (
                   <CreditCard className="w-5 h-5" />
@@ -77,7 +82,7 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
               </div>
             </div>
           </div>
-
+ 
           {/* Card Middle: Gold Chip & Key info */}
           <div className="flex items-center justify-between my-2">
             {/* Simulated Gold Chip */}
@@ -94,26 +99,36 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
             
             {/* Bank text branding */}
             <span className="font-bold text-xs uppercase tracking-widest bg-white/10 px-2.5 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-              {primaryKey.walletType === 'PIX' ? primaryKey.bankName : primaryKey.cardProvider || 'Gateway'}
+              {primaryKey.walletType === 'PIX'
+                ? primaryKey.bankName
+                : primaryKey.walletType === 'PIX_AUTO'
+                ? 'Asaas / Efí'
+                : primaryKey.cardProvider || 'Gateway'}
             </span>
           </div>
-
+ 
           {/* Card Bottom Row: Holder Name & Action */}
           <div className="flex justify-between items-end border-t border-white/10 pt-3">
             <div className="flex flex-col max-w-[70%]">
               <span className="text-[9px] uppercase tracking-widest text-white/50 font-semibold">
-                {primaryKey.walletType === 'PIX' ? 'Titular' : 'Provedor'}
+                {primaryKey.walletType === 'PIX' || primaryKey.walletType === 'PIX_AUTO' ? 'Titular' : 'Provedor'}
               </span>
               <span className="font-bold text-xs tracking-wide truncate uppercase">
-                {primaryKey.walletType === 'PIX' ? primaryKey.name : `${primaryKey.cardProvider || 'Gateway'} Gateway`}
+                {primaryKey.walletType === 'PIX'
+                  ? primaryKey.name
+                  : primaryKey.walletType === 'PIX_AUTO'
+                  ? 'Roteamento MandaPIX'
+                  : `${primaryKey.cardProvider || 'Gateway'} Gateway`}
               </span>
               <span className="font-mono text-[10px] text-white/80 mt-1 truncate">
                 {primaryKey.walletType === 'PIX' 
                   ? primaryKey.key 
+                  : primaryKey.walletType === 'PIX_AUTO'
+                  ? 'Tarifa Dinâmica Ativa'
                   : `ID: •••• •••• •••• ${primaryKey.accountIdentifier?.slice(-4) || 'CARD'}`}
               </span>
             </div>
-
+ 
             <button
               onClick={handleCopy}
               className={`p-2 rounded-xl flex items-center justify-center gap-1.5 transition-all text-xs font-bold border backdrop-blur-sm ${
@@ -128,7 +143,7 @@ export const VirtualCard: React.FC<VirtualCardProps> = ({ primaryKey, onNavigate
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" /> {primaryKey.walletType === 'PIX' ? 'Copiar Chave' : 'Copiar ID'}
+                  <Copy className="w-3.5 h-3.5" /> {primaryKey.walletType === 'PIX' ? 'Copiar Chave' : primaryKey.walletType === 'PIX_AUTO' ? 'Copiar Status' : 'Copiar ID'}
                 </>
               )}
             </button>

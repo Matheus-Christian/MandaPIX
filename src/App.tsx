@@ -1,17 +1,37 @@
-import { useState, useEffect } from 'react';
-import { Home, History, Users, ArrowRight, ArrowLeft, FolderOpen, DollarSign, Calendar, Clock, TrendingUp, Menu, X, AlertCircle, ShoppingBag, ShoppingCart, Wallet } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { 
-  DEFAULT_KEYS, 
-  DEFAULT_CLIENTS, 
-  DEFAULT_PRODUCTS, 
-  DEFAULT_CATALOGS,
-  DEFAULT_STORES,
-  DEFAULT_ORDERS,
-  initializeDefaultInvoices, 
+  Home, 
+  History, 
+  Users, 
+  ArrowRight, 
+  ArrowLeft, 
+  FolderOpen, 
+  DollarSign, 
+  Calendar, 
+  Clock, 
+  TrendingUp, 
+  Menu, 
+  X, 
+  AlertCircle, 
+  ShoppingBag, 
+  ShoppingCart, 
+  Wallet as WalletIcon,
+  LogOut
+} from 'lucide-react';
+import { 
+  BrowserRouter, 
+  Routes, 
+  Route, 
+  Navigate, 
+  useNavigate 
+} from 'react-router-dom';
+
+import { 
   formatBRL,
-  generatePixPayload
+  generatePixPayload,
+  routePixPayment
 } from './utils/pix';
-import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, Installment } from './utils/pix';
+import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order } from './utils/pix';
 
 import { VirtualCard } from './components/VirtualCard';
 import { ClientManager } from './components/ClientManager';
@@ -22,315 +42,604 @@ import { StoreManager } from './components/StoreManager';
 import { OrderManager } from './components/OrderManager';
 import { StorefrontSimulator } from './components/StorefrontSimulator';
 
-function App() {
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { Login } from './pages/Login';
+import { AdminDashboard } from './pages/AdminDashboard';
+import { LandingPage } from './pages/LandingPage';
+import { supabase, isSupabaseConfigured } from './utils/supabaseClient';
+import { SupabaseSetupScreen } from './components/SupabaseSetupScreen';
+
+// Protetor de rotas privadas
+const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+};
+
+// Componente principal do Tenant Workspace
+function MandaPixApp() {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>('dashboard');
-  
-  // Responsive Sidebar menu state for mobile drawer
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // States
-  const [stores, setStores] = useState<Store[]>(() => {
-    const stored = localStorage.getItem('mandapix_stores');
-    return stored ? JSON.parse(stored) : DEFAULT_STORES;
-  });
-
+  // States de Dados
+  const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs'>('orders');
   const [isStorefrontOpen, setIsStorefrontOpen] = useState(false);
 
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const stored = localStorage.getItem('mandapix_orders');
-    return stored ? JSON.parse(stored) : DEFAULT_ORDERS;
-  });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [catalogs, setCatalogs] = useState<Catalog[]>([]);
+  const [products, setProducts] = useState<ProductService[]>([]);
+  const [savedKeys, setSavedKeys] = useState<SavedPixKey[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [routingSettings, setRoutingSettings] = useState<any>(null);
 
-  const [clients, setClients] = useState<Client[]>(() => {
-    const stored = localStorage.getItem('mandapix_clients');
-    return stored ? JSON.parse(stored) : DEFAULT_CLIENTS;
-  });
+  // Estados de Carregamento
+  const [loadingData, setLoadingData] = useState(true);
 
-  const [catalogs, setCatalogs] = useState<Catalog[]>(() => {
-    const stored = localStorage.getItem('mandapix_catalogs');
-    return stored ? JSON.parse(stored) : DEFAULT_CATALOGS;
-  });
-
-  const [products, setProducts] = useState<ProductService[]>(() => {
-    const stored = localStorage.getItem('mandapix_products');
-    return stored ? JSON.parse(stored) : DEFAULT_PRODUCTS;
-  });
-
-  const [savedKeys, setSavedKeys] = useState<SavedPixKey[]>(() => {
-    const storedWallets = localStorage.getItem('mandapix_saved_wallets');
-    if (storedWallets) {
-      try {
-        return JSON.parse(storedWallets);
-      } catch (e) {}
-    }
-    const storedKeys = localStorage.getItem('mandapix_saved_keys');
-    if (storedKeys) {
-      try {
-        const parsed = JSON.parse(storedKeys);
-        const migrated = parsed.map((k: any) => ({ ...k, walletType: k.walletType || 'PIX' }));
-        localStorage.setItem('mandapix_saved_wallets', JSON.stringify(migrated));
-        return migrated;
-      } catch (e) {}
-    }
-    const defaults = DEFAULT_KEYS.map(k => ({ ...k, walletType: k.walletType || 'PIX' }));
-    localStorage.setItem('mandapix_saved_wallets', JSON.stringify(defaults));
-    return defaults;
-  });
-
-  const [invoices, setInvoices] = useState<Invoice[]>(() => {
-    const stored = localStorage.getItem('mandapix_invoices');
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return initializeDefaultInvoices(DEFAULT_KEYS);
-      }
-    }
-    return initializeDefaultInvoices(DEFAULT_KEYS);
-  });
-
-  // Dashboard filter state
+  // Filtros de Dashboard
   const [periodFilter, setPeriodFilter] = useState<'30_DAYS' | '90_DAYS' | 'THIS_MONTH' | 'ALL'>('ALL');
+  const [dashboardStoreFilter, setDashboardStoreFilter] = useState<string>('ALL');
 
-  // Local Storage Sync
-  useEffect(() => {
-    localStorage.setItem('mandapix_stores', JSON.stringify(stores));
-  }, [stores]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_orders', JSON.stringify(orders));
-  }, [orders]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_clients', JSON.stringify(clients));
-  }, [clients]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_products', JSON.stringify(products));
-  }, [products]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_catalogs', JSON.stringify(catalogs));
-  }, [catalogs]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_saved_wallets', JSON.stringify(savedKeys));
-    localStorage.setItem('mandapix_saved_keys', JSON.stringify(savedKeys));
-  }, [savedKeys]);
-
-  useEffect(() => {
-    localStorage.setItem('mandapix_invoices', JSON.stringify(invoices));
-  }, [invoices]);
-
-  // Migration for old products without catalogId or with invalid catalogId, and items without storeId
-  useEffect(() => {
-    let hasChanges = false;
-    
-    // 1. Ensure we have stores
-    let currentStores = [...stores];
-    if (stores.length === 0) {
-      currentStores = DEFAULT_STORES;
-      setStores(currentStores);
-      localStorage.setItem('mandapix_stores', JSON.stringify(currentStores));
-      hasChanges = true;
+  // Carregar todos os dados do Supabase baseando-se nas políticas de RLS (tenant_id)
+  const loadAllData = async () => {
+    if (!user) return;
+    setLoadingData(true);
+    try {
+      await Promise.all([
+        loadStores(),
+        loadClients(),
+        loadCatalogs(),
+        loadProducts(),
+        loadWallets(),
+        loadInvoices(),
+        loadOrders(),
+        loadRoutingSettings()
+      ]);
+    } catch (err) {
+      console.error('Erro ao carregar dados do Supabase:', err);
+    } finally {
+      setLoadingData(false);
     }
-    const defaultStoreId = currentStores[0]?.id || 'store-1';
+  };
 
-    // 2. Ensure all clients have storeId
-    const updatedClients = clients.map(c => {
-      if (!c.storeId) {
-        hasChanges = true;
-        return { ...c, storeId: defaultStoreId };
+  const loadRoutingSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('key', 'pix_routing')
+        .single();
+      if (error) {
+        console.warn('Erro ao carregar configurações de roteamento, usando padrões:', error);
+        setRoutingSettings({
+          threshold: 100,
+          below: {
+            asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' },
+            efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' }
+          },
+          above: {
+            asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' },
+            efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' }
+          }
+        });
+      } else {
+        setRoutingSettings(data.value);
       }
-      return c;
-    });
+    } catch (err) {
+      console.error('Erro ao carregar roteamento:', err);
+    }
+  };
 
-    // 3. Ensure catalogs exist and have storeId
-    let updatedCatalogs = [...catalogs];
-    if (catalogs.length === 0) {
-      const defaultCat = {
-        id: 'cat-general',
-        storeId: defaultStoreId,
-        name: 'Catálogo Geral',
-        description: 'Catálogo contendo produtos cadastrados anteriormente'
-      };
-      updatedCatalogs = [defaultCat];
-      setCatalogs(updatedCatalogs);
-      localStorage.setItem('mandapix_catalogs', JSON.stringify(updatedCatalogs));
-      hasChanges = true;
-    } else {
-      updatedCatalogs = catalogs.map(c => {
-        if (!c.storeId) {
-          hasChanges = true;
-          return { ...c, storeId: defaultStoreId };
+  const loadStores = async () => {
+    const { data, error } = await supabase
+      .from('stores')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    setStores(data || []);
+  };
+  const loadClients = async () => {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .order('name', { ascending: true });
+    if (error) throw error;
+    setClients((data || []).map((d: any) => ({
+      id: d.id,
+      storeId: d.store_id,
+      name: d.name,
+      document: d.document,
+      email: d.email,
+      phone: d.phone
+    })));
+  };
+
+  const loadCatalogs = async () => {
+    const { data, error } = await supabase
+      .from('catalogs')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    setCatalogs((data || []).map((d: any) => ({
+      id: d.id,
+      storeId: d.store_id,
+      name: d.name,
+      description: d.description
+    })));
+  };
+
+  const loadProducts = async () => {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('name', { ascending: true });
+    if (error) throw error;
+    setProducts((data || []).map((d: any) => ({
+      id: d.id,
+      catalogId: d.catalog_id,
+      name: d.name,
+      type: d.type,
+      price: Number(d.price),
+      description: d.description
+    })));
+  };
+
+  const loadWallets = async () => {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .order('is_primary', { ascending: false });
+    if (error) throw error;
+    setSavedKeys((data || []).map((d: any) => ({
+      id: d.id,
+      walletType: d.wallet_type,
+      label: d.label,
+      bankName: d.bank_name,
+      isPrimary: d.is_primary,
+      type: d.type,
+      key: d.key,
+      name: d.name,
+      city: d.city,
+      cardProvider: d.card_provider,
+      accountIdentifier: d.account_identifier
+    })));
+  };
+
+  const loadInvoices = async () => {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*, installments(*)')
+      .order('date_created', { ascending: false });
+    if (error) throw error;
+    setInvoices((data || []).map((d: any) => ({
+      id: d.id,
+      storeId: d.store_id,
+      invoiceNumber: d.invoice_number,
+      clientId: d.client_id,
+      productServiceId: d.product_service_id,
+      description: d.description,
+      totalAmount: Number(d.total_amount),
+      dateCreated: d.date_created,
+      installmentsCount: d.installments_count,
+      walletId: d.wallet_id,
+      pixKeyId: d.wallet_id,
+      paymentMethodUsed: d.payment_method_used,
+      routedGateway: d.routed_gateway,
+      transactionFee: d.transaction_fee ? Number(d.transaction_fee) : undefined,
+      installments: (d.installments || []).map((inst: any) => ({
+        id: inst.id,
+        number: inst.number,
+        amount: Number(inst.amount),
+        dueDate: inst.due_date,
+        status: inst.status,
+        pixPayload: inst.pix_payload,
+        confirmedDate: inst.confirmed_date,
+        paymentMethodUsed: inst.payment_method_used,
+        routedGateway: inst.routed_gateway,
+        transactionFee: inst.transaction_fee ? Number(inst.transaction_fee) : undefined
+      })).sort((a: any, b: any) => a.number - b.number)
+    })));
+  };
+
+  const loadOrders = async () => {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('date_created', { ascending: false });
+    if (error) throw error;
+    setOrders((data || []).map((d: any) => ({
+      id: d.id,
+      storeId: d.store_id,
+      orderNumber: d.order_number,
+      clientName: d.client_name,
+      clientPhone: d.client_phone,
+      clientEmail: d.client_email,
+      clientDocument: d.client_document,
+      items: d.items,
+      totalAmount: Number(d.total_amount),
+      status: d.status,
+      dateCreated: d.date_created,
+      invoiceId: d.invoice_id
+    })));
+  };;
+
+  useEffect(() => {
+    loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Callbacks para Lojas
+  const handleAddStore = async (newStoreData: Omit<Store, 'id'>) => {
+    try {
+      const { error } = await supabase
+        .from('stores')
+        .insert([newStoreData]);
+      if (error) throw error;
+      await loadStores();
+    } catch (err) {
+      console.error('Erro ao adicionar loja:', err);
+    }
+  };
+
+  const handleEditStore = async (updatedStore: Store) => {
+    try {
+      const { error } = await supabase
+        .from('stores')
+        .update({ name: updatedStore.name, description: updatedStore.description, color: updatedStore.color })
+        .eq('id', updatedStore.id);
+      if (error) throw error;
+      await loadStores();
+    } catch (err) {
+      console.error('Erro ao editar loja:', err);
+    }
+  };
+
+  const handleDeleteStore = async (id: string) => {
+    if (!confirm('Deseja excluir esta loja? Todos os catálogos, pedidos, clientes e faturas vinculados serão excluídos.')) return;
+    try {
+      const { error } = await supabase
+        .from('stores')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      if (activeStoreId === id) {
+        setActiveStoreId(null);
+      }
+      await loadAllData();
+    } catch (err) {
+      console.error('Erro ao excluir loja:', err);
+    }
+  };
+
+  // Callbacks para Clientes
+  const handleAddClient = async (newClientData: Omit<Client, 'id'>) => {
+    try {
+      const { error } = await supabase
+        .from('clients')
+        .insert([{
+          store_id: newClientData.storeId,
+          name: newClientData.name,
+          document: newClientData.document,
+          email: newClientData.email,
+          phone: newClientData.phone
+        }]);
+      if (error) throw error;
+      await loadClients();
+    } catch (err) {
+      console.error('Erro ao adicionar cliente:', err);
+    }
+  };
+
+  const handleEditClient = async (updatedClient: Client) => {
+    try {
+      const { error } = await supabase
+        .from('clients')
+        .update({
+          name: updatedClient.name,
+          document: updatedClient.document,
+          email: updatedClient.email,
+          phone: updatedClient.phone
+        })
+        .eq('id', updatedClient.id);
+      if (error) throw error;
+      await loadClients();
+    } catch (err) {
+      console.error('Erro ao editar cliente:', err);
+    }
+  };
+
+  const handleDeleteClient = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('clients')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadClients();
+    } catch (err) {
+      console.error('Erro ao deletar cliente:', err);
+    }
+  };
+
+  // Callbacks para Produtos
+  const handleAddProduct = async (newProductData: Omit<ProductService, 'id'>) => {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .insert([{
+          catalog_id: newProductData.catalogId,
+          name: newProductData.name,
+          type: newProductData.type,
+          price: newProductData.price,
+          description: newProductData.description
+        }]);
+      if (error) throw error;
+      await loadProducts();
+    } catch (err) {
+      console.error('Erro ao adicionar produto:', err);
+    }
+  };
+
+  const handleEditProduct = async (updatedProduct: ProductService) => {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          name: updatedProduct.name,
+          type: updatedProduct.type,
+          price: updatedProduct.price,
+          description: updatedProduct.description
+        })
+        .eq('id', updatedProduct.id);
+      if (error) throw error;
+      await loadProducts();
+    } catch (err) {
+      console.error('Erro ao editar produto:', err);
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadProducts();
+    } catch (err) {
+      console.error('Erro ao deletar produto:', err);
+    }
+  };
+
+  // Callbacks para Catálogos
+  const handleAddCatalog = async (newCatData: Omit<Catalog, 'id'>) => {
+    try {
+      const { error } = await supabase
+        .from('catalogs')
+        .insert([{
+          store_id: newCatData.storeId,
+          name: newCatData.name,
+          description: newCatData.description
+        }]);
+      if (error) throw error;
+      await loadCatalogs();
+    } catch (err) {
+      console.error('Erro ao adicionar catálogo:', err);
+    }
+  };
+
+  const handleEditCatalog = async (updatedCat: Catalog) => {
+    try {
+      const { error } = await supabase
+        .from('catalogs')
+        .update({
+          name: updatedCat.name,
+          description: updatedCat.description
+        })
+        .eq('id', updatedCat.id);
+      if (error) throw error;
+      await loadCatalogs();
+    } catch (err) {
+      console.error('Erro ao editar catálogo:', err);
+    }
+  };
+
+  const handleDeleteCatalog = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('catalogs')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadCatalogs();
+      await loadProducts();
+    } catch (err) {
+      console.error('Erro ao deletar catálogo:', err);
+    }
+  };
+
+  // Callbacks para Faturas
+  const handleAddInvoice = async (newInvoice: Invoice) => {
+    try {
+      const { data: invData, error: invError } = await supabase
+        .from('invoices')
+        .insert([{
+          store_id: newInvoice.storeId,
+          invoice_number: newInvoice.invoiceNumber,
+          client_id: newInvoice.clientId,
+          product_service_id: newInvoice.productServiceId || null,
+          description: newInvoice.description,
+          total_amount: newInvoice.totalAmount,
+          installments_count: newInvoice.installmentsCount,
+          wallet_id: newInvoice.walletId || newInvoice.pixKeyId || null,
+          payment_method_used: newInvoice.paymentMethodUsed || null
+        }])
+        .select()
+        .single();
+      
+      if (invError) throw invError;
+      
+      const installmentsToInsert = newInvoice.installments.map(inst => ({
+        invoice_id: invData.id,
+        number: inst.number,
+        amount: inst.amount,
+        due_date: inst.dueDate,
+        status: inst.status,
+        pix_payload: inst.pixPayload,
+        confirmed_date: inst.confirmedDate || null,
+        payment_method_used: inst.paymentMethodUsed || null
+      }));
+
+      const { error: instError } = await supabase
+        .from('installments')
+        .insert(installmentsToInsert);
+      
+      if (instError) throw instError;
+
+      await loadInvoices();
+    } catch (err) {
+      console.error('Erro ao adicionar fatura:', err);
+    }
+  };
+
+  const handleEditInvoice = async (updatedInvoice: Invoice) => {
+    try {
+      const { error } = await supabase
+        .from('invoices')
+        .update({
+          description: updatedInvoice.description,
+          total_amount: updatedInvoice.totalAmount,
+          wallet_id: updatedInvoice.walletId || updatedInvoice.pixKeyId || null,
+          payment_method_used: updatedInvoice.paymentMethodUsed || null
+        })
+        .eq('id', updatedInvoice.id);
+
+      if (error) throw error;
+      await loadInvoices();
+    } catch (err) {
+      console.error('Erro ao editar fatura:', err);
+    }
+  };
+
+  const handleDeleteInvoice = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadInvoices();
+      await loadOrders();
+    } catch (err) {
+      console.error('Erro ao deletar fatura:', err);
+    }
+  };
+
+  const handleUpdateInstallmentStatus = async (
+    invoiceId: string,
+    installmentId: string,
+    status: 'PAGO' | 'PENDENTE',
+    paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'
+  ) => {
+    try {
+      const { error } = await supabase
+        .from('installments')
+        .update({
+          status,
+          confirmed_date: status === 'PAGO' ? new Date().toISOString().split('T')[0] : null,
+          payment_method_used: status === 'PAGO' ? (paymentMethodUsed || 'PIX') : null
+        })
+        .eq('id', installmentId);
+      
+      if (error) throw error;
+
+      const order = orders.find(o => o.invoiceId === invoiceId);
+      if (order) {
+        const { data: instsData, error: instsError } = await supabase
+          .from('installments')
+          .select('*')
+          .eq('invoice_id', invoiceId);
+        
+        if (instsError) throw instsError;
+
+        const allPaid = instsData.every((inst: any) => inst.status === 'PAGO');
+        const newStatus = allPaid ? 'APROVADO' : 'PENDENTE';
+        
+        if (order.status !== newStatus) {
+          await supabase
+            .from('orders')
+            .update({ status: newStatus })
+            .eq('id', order.id);
         }
-        return c;
-      });
-    }
-
-    const targetCatalogId = updatedCatalogs[0]?.id || 'cat-general';
-
-    // 4. Ensure all products belong to a valid catalog
-    const updatedProducts = products.map(p => {
-      const catalogExists = updatedCatalogs.some(c => c.id === p.catalogId);
-      if (!p.catalogId || !catalogExists) {
-        hasChanges = true;
-        return { ...p, catalogId: targetCatalogId };
       }
-      return p;
-    });
 
-    // 5. Ensure all invoices have storeId
-    const updatedInvoices = invoices.map(inv => {
-      if (!inv.storeId) {
-        hasChanges = true;
-        const clientObj = updatedClients.find(c => c.id === inv.clientId);
-        const invStoreId = clientObj?.storeId || defaultStoreId;
-        return { ...inv, storeId: invStoreId };
-      }
-      return inv;
-    });
-
-    // 6. Ensure all orders have storeId
-    const updatedOrders = orders.map(ord => {
-      if (!ord.storeId) {
-        hasChanges = true;
-        return { ...ord, storeId: defaultStoreId };
-      }
-      return ord;
-    });
-
-    if (hasChanges) {
-      setClients(updatedClients);
-      localStorage.setItem('mandapix_clients', JSON.stringify(updatedClients));
-
-      setCatalogs(updatedCatalogs);
-      localStorage.setItem('mandapix_catalogs', JSON.stringify(updatedCatalogs));
-
-      setProducts(updatedProducts);
-      localStorage.setItem('mandapix_products', JSON.stringify(updatedProducts));
-
-      setInvoices(updatedInvoices);
-      localStorage.setItem('mandapix_invoices', JSON.stringify(updatedInvoices));
-
-      setOrders(updatedOrders);
-      localStorage.setItem('mandapix_orders', JSON.stringify(updatedOrders));
-    }
-  }, [stores, clients, catalogs, products, invoices, orders]);
-
-  // Callbacks for Stores
-  const handleAddStore = (newStoreData: Omit<Store, 'id'>) => {
-    const newStore: Store = {
-      id: `store-${Date.now()}`,
-      ...newStoreData
-    };
-    setStores(prev => [...prev, newStore]);
-  };
-
-  const handleEditStore = (updatedStore: Store) => {
-    setStores(prev => prev.map(s => s.id === updatedStore.id ? updatedStore : s));
-  };
-
-  const handleDeleteStore = (id: string) => {
-    setStores(prev => prev.filter(s => s.id !== id));
-    const catalogsToDelete = catalogs.filter(cat => cat.storeId === id).map(cat => cat.id);
-    
-    setClients(prev => prev.filter(c => c.storeId !== id));
-    setCatalogs(prev => prev.filter(cat => cat.storeId !== id));
-    setProducts(prev => prev.filter(p => !catalogsToDelete.includes(p.catalogId)));
-    setInvoices(prev => prev.filter(inv => inv.storeId !== id));
-    
-    if (activeStoreId === id) {
-      setActiveStoreId(null);
+      await loadInvoices();
+      await loadOrders();
+    } catch (err) {
+      console.error('Erro ao atualizar status da parcela:', err);
     }
   };
 
-  // Callbacks for Clients
-  const handleAddClient = (newClientData: Omit<Client, 'id'>) => {
-    const newClient: Client = {
-      id: `cli-${Date.now()}`,
-      ...newClientData
-    };
-    setClients(prev => [...prev, newClient]);
+  // Callbacks para Pedidos
+  const handleCancelOrder = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'CANCELADO' })
+        .eq('id', id);
+      if (error) throw error;
+      await loadOrders();
+    } catch (err) {
+      console.error('Erro ao cancelar pedido:', err);
+    }
   };
 
-  const handleDeleteClient = (id: string) => {
-    setClients(prev => prev.filter(c => c.id !== id));
-  };
+  const handleUpdateOrderStatus = async (id: string, newStatus: Order['status']) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: newStatus })
+        .eq('id', id);
+      if (error) throw error;
 
-  // Callbacks for Products
-  const handleAddProduct = (newProductData: Omit<ProductService, 'id'>) => {
-    const newProduct: ProductService = {
-      id: `prod-${Date.now()}`,
-      ...newProductData
-    };
-    setProducts(prev => [...prev, newProduct]);
-  };
-
-  const handleDeleteProduct = (id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
-  };
-
-  // Callbacks for Catalogs
-  const handleAddCatalog = (newCatData: Omit<Catalog, 'id'>) => {
-    const newCat: Catalog = {
-      id: `cat-${Date.now()}`,
-      ...newCatData
-    };
-    setCatalogs(prev => [...prev, newCat]);
-  };
-
-  const handleEditCatalog = (updatedCat: Catalog) => {
-    setCatalogs(prev => prev.map(c => c.id === updatedCat.id ? { ...c, ...updatedCat } : c));
-  };
-
-  const handleDeleteCatalog = (id: string) => {
-    setCatalogs(prev => prev.filter(c => c.id !== id));
-    setProducts(prev => prev.filter(p => p.catalogId !== id));
-  };
-
-  // Callbacks for Invoices
-  const handleAddInvoice = (newInvoice: Invoice) => {
-    setInvoices(prev => [newInvoice, ...prev]);
-  };
-
-  const handleDeleteInvoice = (id: string) => {
-    setInvoices(prev => prev.filter(inv => inv.id !== id));
-  };
-
-  const handleEditClient = (updatedClient: Client) => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? { ...c, ...updatedClient } : c));
-  };
-
-  const handleEditProduct = (updatedProduct: ProductService) => {
-    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? { ...p, ...updatedProduct } : p));
-  };
-
-  const handleEditInvoice = (updatedInvoice: Invoice) => {
-    setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? { ...inv, ...updatedInvoice } : inv));
-  };
-
-  // Callbacks for Orders
-  const handleCancelOrder = (id: string) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'CANCELADO' } : o));
-  };
-
-  const handleUpdateOrderStatus = (id: string, newStatus: Order['status']) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o));
-
-    // If transitioning to APROVADO, mark the first linked invoice installment as PAGO if not already
-    if (newStatus === 'APROVADO') {
-      const order = orders.find(o => o.id === id);
-      if (order && order.invoiceId) {
-        const inv = invoices.find(i => i.id === order.invoiceId);
-        if (inv && inv.installments.length > 0) {
-          if (inv.installments[0].status !== 'PAGO') {
-            handleUpdateInstallmentStatus(order.invoiceId, inv.installments[0].id, 'PAGO');
+      if (newStatus === 'APROVADO') {
+        const order = orders.find(o => o.id === id);
+        if (order && order.invoiceId) {
+          const inv = invoices.find(i => i.id === order.invoiceId);
+          if (inv && inv.installments.length > 0) {
+            const firstInst = inv.installments[0];
+            if (firstInst.status !== 'PAGO') {
+              await supabase
+                .from('installments')
+                .update({
+                  status: 'PAGO',
+                  confirmed_date: new Date().toISOString().split('T')[0],
+                  payment_method_used: firstInst.paymentMethodUsed || 'PIX'
+                })
+                .eq('id', firstInst.id);
+            }
           }
         }
       }
+
+      await loadOrders();
+      await loadInvoices();
+    } catch (err) {
+      console.error('Erro ao atualizar status do pedido:', err);
     }
   };
 
@@ -342,84 +651,15 @@ function App() {
     items: Array<{ productServiceId: string; quantity: number }>;
     paymentMethod?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
   }) => {
-    let targetClientId = '';
-    const existingClient = clients.find(c => c.storeId === activeStoreId && c.document === orderData.clientDocument);
-    if (existingClient) {
-      targetClientId = existingClient.id;
-    } else {
-      const newClient: Client = {
-        id: `cli-${Date.now()}`,
-        storeId: activeStoreId!,
-        name: orderData.clientName,
-        document: orderData.clientDocument,
-        email: orderData.clientEmail,
-        phone: orderData.clientPhone
-      };
-      setClients(prev => [...prev, newClient]);
-      targetClientId = newClient.id;
-    }
+    try {
+      const method = orderData.paymentMethod || 'PIX';
+      const key = (method === 'PIX')
+        ? (savedKeys.find(k => k.walletType === 'PIX_AUTO') || savedKeys.find(k => k.walletType === 'PIX') || savedKeys.find(k => k.isPrimary) || savedKeys[0])
+        : (savedKeys.find(k => k.walletType === method) || savedKeys.find(k => k.isPrimary) || savedKeys[0]);
 
-    const invoiceNum = invoices.length > 0 
-      ? String(Math.max(...invoices.map(inv => parseInt(inv.invoiceNumber) || 1000)) + 1)
-      : '1001';
+      if (!key) throw new Error('Nenhuma carteira receptora configurada pelo lojista.');
 
-    const total = orderData.items.reduce((sum, item) => {
-      const prod = products.find(p => p.id === item.productServiceId);
-      return sum + (prod ? prod.price * item.quantity : 0);
-    }, 0);
-
-    const method = orderData.paymentMethod || 'PIX';
-    const key = savedKeys.find(k => k.walletType === method) || savedKeys.find(k => k.isPrimary) || savedKeys[0] || DEFAULT_KEYS[0];
-    const installmentId = `inst-${Date.now()}-1`;
-    
-    const pixPayload = key.walletType === 'PIX'
-      ? generatePixPayload({
-          key: key.key,
-          keyType: key.type,
-          name: key.name,
-          city: key.city,
-          amount: total,
-          description: `#${invoiceNum} Parc 1/1`.substring(0, 72)
-        })
-      : `card_payment_token_${Date.now()}_${total}`;
-
-    const newInstallment: Installment = {
-      id: installmentId,
-      number: 1,
-      amount: total,
-      dueDate: new Date().toISOString().split('T')[0],
-      status: 'PENDENTE',
-      pixPayload,
-      paymentMethodUsed: key.walletType
-    };
-
-    const invoiceId = `inv-${Date.now()}`;
-    const newInvoice: Invoice = {
-      id: invoiceId,
-      storeId: activeStoreId!,
-      invoiceNumber: invoiceNum,
-      clientId: targetClientId,
-      description: `Pedido #${invoiceNum} gerado via Catálogo Online`,
-      totalAmount: total,
-      dateCreated: new Date().toISOString().split('T')[0],
-      installmentsCount: 1,
-      pixKeyId: key.id,
-      walletId: key.id,
-      paymentMethodUsed: key.walletType,
-      installments: [newInstallment]
-    };
-    setInvoices(prev => [newInvoice, ...prev]);
-
-    const orderId = `ord-${Date.now()}`;
-    const newOrder: Order = {
-      id: orderId,
-      storeId: activeStoreId!,
-      orderNumber: invoiceNum,
-      clientName: orderData.clientName,
-      clientPhone: orderData.clientPhone,
-      clientEmail: orderData.clientEmail,
-      clientDocument: orderData.clientDocument,
-      items: orderData.items.map(item => {
+      const itemsWithDetails = orderData.items.map(item => {
         const prod = products.find(p => p.id === item.productServiceId);
         return {
           productServiceId: item.productServiceId,
@@ -427,72 +667,123 @@ function App() {
           quantity: item.quantity,
           price: prod?.price || 0
         };
-      }),
-      totalAmount: total,
-      status: 'PENDENTE',
-      dateCreated: new Date().toISOString(),
-      invoiceId
-    };
-    setOrders(prev => [newOrder, ...prev]);
+      });
 
-    return {
-      orderNumber: invoiceNum,
-      pixPayload,
-      invoiceId
-    };
-  };
+      const subtotal = itemsWithDetails.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+      let routedGateway = null;
+      let transactionFee = null;
+      let finalTotal = subtotal;
 
-  const handleUpdateInstallmentStatus = (
-    invoiceId: string,
-    installmentId: string,
-    status: 'PAGO' | 'PENDENTE',
-    paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'
-  ) => {
-    setInvoices(prev => prev.map(inv => {
-      if (inv.id === invoiceId) {
-        const updatedInsts = inv.installments.map(inst => {
-          if (inst.id === installmentId) {
-            return {
-              ...inst,
-              status,
-              confirmedDate: status === 'PAGO' ? new Date().toISOString().split('T')[0] : undefined,
-              paymentMethodUsed: status === 'PAGO' ? (paymentMethodUsed || inst.paymentMethodUsed || 'PIX') : undefined
-            };
-          }
-          return inst;
-        });
+      // Executa o checkout atômico no banco em nome do tenant
+      const { data, error } = await supabase.rpc('create_storefront_order', {
+        p_store_id: activeStoreId,
+        p_client_name: orderData.clientName,
+        p_client_document: orderData.clientDocument,
+        p_client_email: orderData.clientEmail,
+        p_client_phone: orderData.clientPhone,
+        p_items: itemsWithDetails,
+        p_payment_method: method,
+        p_wallet_id: key.id
+      });
 
-        // Sync order status if fully paid or reverted
-        const isAllPaid = updatedInsts.every(inst => inst.status === 'PAGO');
-        if (isAllPaid) {
-          setOrders(prevOrders => prevOrders.map(o => {
-            if (o.invoiceId === invoiceId && o.status === 'PENDENTE') {
-              return { ...o, status: 'APROVADO' };
-            }
-            return o;
-          }));
+      if (error) throw error;
+
+      let pixPayload = data.pixPayload;
+      
+      if (method === 'PIX') {
+        if (key.walletType === 'PIX_AUTO') {
+          const route = routePixPayment(subtotal, routingSettings || {
+            threshold: 100,
+            below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+            above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+          });
+          
+          routedGateway = route.gateway;
+          transactionFee = route.fee;
+          finalTotal = route.total;
+
+          pixPayload = generatePixPayload({
+            key: route.key,
+            keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
+            name: `MandaPIX Central (${route.gateway})`,
+            city: 'SAO PAULO',
+            amount: route.total,
+            description: `#${data.orderNumber} Parc 1/1`.substring(0, 72)
+          });
         } else {
-          setOrders(prevOrders => prevOrders.map(o => {
-            if (o.invoiceId === invoiceId) {
-              return { ...o, status: 'PENDENTE' };
-            }
-            return o;
-          }));
+          pixPayload = generatePixPayload({
+            key: key.key,
+            keyType: key.type,
+            name: key.name,
+            city: key.city,
+            amount: subtotal,
+            description: `#${data.orderNumber} Parc 1/1`.substring(0, 72)
+          });
         }
 
-        return { ...inv, installments: updatedInsts };
+        // Buscar parcela única e salvar o payload real gerado
+        const { data: instData } = await supabase
+          .from('installments')
+          .select('id')
+          .eq('invoice_id', data.invoiceId)
+          .single();
+
+        if (instData) {
+          // Atualizar faturas
+          await supabase
+            .from('invoices')
+            .update({
+              routed_gateway: routedGateway,
+              transaction_fee: transactionFee,
+              total_amount: finalTotal
+            })
+            .eq('id', data.invoiceId);
+
+          // Atualizar parcelas
+          await supabase
+            .from('installments')
+            .update({ 
+              pix_payload: pixPayload,
+              routed_gateway: routedGateway,
+              transaction_fee: transactionFee,
+              amount: finalTotal
+            })
+            .eq('id', instData.id);
+
+          // Atualizar pedido total_amount
+          await supabase
+            .from('orders')
+            .update({ total_amount: finalTotal })
+            .eq('invoice_id', data.invoiceId);
+        }
       }
-      return inv;
-    }));
+
+      await loadAllData();
+
+      return {
+        orderNumber: data.orderNumber,
+        pixPayload,
+        invoiceId: data.invoiceId,
+        routedGateway,
+        transactionFee
+      };
+    } catch (err: any) {
+      console.error('Erro ao processar pedido:', err);
+      alert('Erro ao criar pedido: ' + err.message);
+      throw err;
+    }
   };
 
-  const handleKeysChanged = (newKeys: SavedPixKey[]) => {
-    setSavedKeys(newKeys);
+  const handleKeysChanged = () => {
+    loadWallets();
   };
 
-  // ERP Accounts Receivable Dashboard Filter & Computations
-  const [dashboardStoreFilter, setDashboardStoreFilter] = useState<string>('ALL');
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
+  // Computações e filtros do Painel Financeiro
   const dashboardInvoices = dashboardStoreFilter === 'ALL' 
     ? invoices 
     : invoices.filter(inv => inv.storeId === dashboardStoreFilter);
@@ -555,15 +846,13 @@ function App() {
 
   const totalBilled = totalPaid + totalA_Vencer + totalVencido;
 
-  // Receiving rate indicator
   const paidRate = totalBilled > 0 ? (totalPaid / totalBilled) * 100 : 0;
   const overdueRate = totalBilled > 0 ? (totalVencido / totalBilled) * 100 : 0;
 
-  // Chart 1: Grouped bar chart calculations (last 4 months)
+  // Gráfico 1: Dados mensais agrupados (últimos 4 meses)
   const getMonthlyChartData = () => {
     const monthGroups: { [key: string]: { paid: number; unpaid: number; label: string } } = {};
     
-    // Seed groups to ensure they are present for recent months
     monthGroups['2026-04'] = { paid: 0, unpaid: 0, label: 'Abr' };
     monthGroups['2026-05'] = { paid: 0, unpaid: 0, label: 'Mai' };
     monthGroups['2026-06'] = { paid: 0, unpaid: 0, label: 'Jun' };
@@ -599,17 +888,15 @@ function App() {
   const monthlyChartData = getMonthlyChartData();
   const maxValInChart = Math.max(
     ...monthlyChartData.map(d => Math.max(d.paid, d.unpaid)),
-    100 // Avoid division by zero
+    100
   );
 
-  // Chart 2: Donut stroke dash details
   const radius = 50;
-  const circ = 2 * Math.PI * radius; // ~314.16
+  const circ = 2 * Math.PI * radius;
   const paidDash = (totalPaid / (totalBilled || 1)) * circ;
   const aVencerDash = (totalA_Vencer / (totalBilled || 1)) * circ;
   const vencidoDash = (totalVencido / (totalBilled || 1)) * circ;
 
-  // Get active key info
   const primaryKey = savedKeys.find(k => k.isPrimary) || savedKeys[0];
 
   const getClientName = (id: string) => {
@@ -617,19 +904,28 @@ function App() {
     return cli ? cli.name : 'Cliente Excluído';
   };
 
-  // Nav menu items definition
   const menuItems = [
     { id: 'dashboard', label: 'Painel', icon: Home },
     { id: 'stores', label: 'Lojas', icon: ShoppingBag },
-    { id: 'wallets', label: 'Carteiras', icon: Wallet }
+    { id: 'wallets', label: 'Carteiras', icon: WalletIcon }
   ] as const;
+
+  if (loadingData) {
+    return (
+      <div className="min-h-screen bg-slate-905 text-slate-100 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-4 border-pix border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Sincronizando Banco de Dados...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
       
       {/* SIDEBAR NAVIGATION (Desktop) */}
       <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white min-h-screen flex-shrink-0 z-20 shadow-xl">
-        {/* Brand Logo */}
         <div className="p-6 border-b border-slate-800/60 flex items-center gap-2.5">
           <div className="p-2 bg-pix rounded-xl text-white shadow-md shadow-pix/20">
             <svg viewBox="0 0 135 135" className="w-5 h-5 fill-white" xmlns="http://www.w3.org/2000/svg">
@@ -665,6 +961,17 @@ function App() {
             );
           })}
         </nav>
+
+        {/* Botão Sair no Desktop */}
+        <div className="px-4 mb-2">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all border border-transparent hover:border-rose-500/20 active:scale-98"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sair da Conta</span>
+          </button>
+        </div>
 
         {/* Footer info in sidebar */}
         {primaryKey && (
@@ -736,6 +1043,14 @@ function App() {
                   );
                 })}
               </nav>
+
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-xs font-bold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sair da Conta</span>
+              </button>
             </div>
             {primaryKey && (
               <div className="bg-slate-800/50 p-4 rounded-xl text-xs space-y-1 border border-slate-800">
@@ -765,7 +1080,6 @@ function App() {
               </div>
               
               <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
-                {/* Store Filter Dropdown */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Filtrar Loja:</span>
                   <select
@@ -780,7 +1094,6 @@ function App() {
                   </select>
                 </div>
 
-                {/* Period Select Filter */}
                 <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5 shadow-sm">
                   {(['30_DAYS', '90_DAYS', 'THIS_MONTH', 'ALL'] as const).map(f => (
                     <button
@@ -804,8 +1117,6 @@ function App() {
               
               {/* 4 KPI CARD MATRIX */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                
-                {/* 1. Total Recebido */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden group">
                   <div className="space-y-1.5 z-10">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Recebido</span>
@@ -820,7 +1131,6 @@ function App() {
                   <div className="absolute right-0 bottom-0 translate-x-[20%] translate-y-[20%] w-20 h-20 bg-emerald-500/5 rounded-full" />
                 </div>
 
-                {/* 2. Total A Vencer */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden group">
                   <div className="space-y-1.5 z-10">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">A Vencer</span>
@@ -835,7 +1145,6 @@ function App() {
                   <div className="absolute right-0 bottom-0 translate-x-[20%] translate-y-[20%] w-20 h-20 bg-slate-400/5 rounded-full" />
                 </div>
 
-                {/* 3. Total Vencido */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden group">
                   <div className="space-y-1.5 z-10">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Atrasado / Vencido</span>
@@ -850,7 +1159,6 @@ function App() {
                   <div className="absolute right-0 bottom-0 translate-x-[20%] translate-y-[20%] w-20 h-20 bg-red-500/5 rounded-full" />
                 </div>
 
-                {/* 4. Recebimento Rate */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden group">
                   <div className="space-y-1.5 z-10">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Taxa de Liquidez</span>
@@ -864,13 +1172,10 @@ function App() {
                   </div>
                   <div className="absolute right-0 bottom-0 translate-x-[20%] translate-y-[20%] w-20 h-20 bg-pix/5 rounded-full" />
                 </div>
-
               </div>
 
               {/* DUAL CHART GRID SYSTEM */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Chart 1: Grouped bar chart (Span 2 columns) */}
                 <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm lg:col-span-2 space-y-4">
                   <div className="flex justify-between items-center pb-2 border-b border-slate-50">
                     <div>
@@ -878,17 +1183,14 @@ function App() {
                       <p className="text-[10px] text-slate-400 font-medium">Comparativo mensal de títulos pagos vs pendentes (BRL)</p>
                     </div>
                     
-                    {/* Color legends */}
                     <div className="flex items-center gap-3 text-[10px] font-bold">
                       <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 block" /> Pago</span>
                       <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-400 block" /> Aberto / A vencer</span>
                     </div>
                   </div>
 
-                  {/* SVG Chart Area */}
                   <div className="w-full">
                     <svg viewBox="0 0 450 220" className="w-full h-auto max-h-[200px]">
-                      {/* Grid Y lines */}
                       {[0, 0.25, 0.5, 0.75, 1].map((r, idx) => (
                         <line 
                           key={idx}
@@ -901,7 +1203,6 @@ function App() {
                         />
                       ))}
 
-                      {/* Render monthly bars */}
                       {monthlyChartData.map((d, idx) => {
                         const xOffset = 60 + idx * 95;
                         const paidHeight = (d.paid / maxValInChart) * 140;
@@ -909,7 +1210,6 @@ function App() {
                         
                         return (
                           <g key={d.key}>
-                            {/* Paid Bar (Green) */}
                             <rect
                               x={xOffset}
                               y={170 - paidHeight}
@@ -919,7 +1219,6 @@ function App() {
                               fill="#34d399"
                               className="transition-all duration-300 hover:fill-emerald-500 cursor-pointer"
                             />
-                            {/* Unpaid Bar (Orange) */}
                             <rect
                               x={xOffset + 28}
                               y={170 - unpaidHeight}
@@ -929,7 +1228,6 @@ function App() {
                               fill="#fb923c"
                               className="transition-all duration-300 hover:fill-orange-500 cursor-pointer"
                             />
-                            {/* Month Label */}
                             <text
                               x={xOffset + 26}
                               y="192"
@@ -940,11 +1238,10 @@ function App() {
                               {d.label}
                             </text>
                             
-                            {/* Value tooltips inside chart bars */}
                             {d.paid > 0 && (
                               <text
                                 x={xOffset + 12}
-                                y={160 - paidHeight}
+                                  y={160 - paidHeight}
                                 textAnchor="middle"
                                 fill="#475569"
                                 className="text-[8px] font-black"
@@ -955,7 +1252,7 @@ function App() {
                             {d.unpaid > 0 && (
                               <text
                                 x={xOffset + 40}
-                                y={160 - unpaidHeight}
+                                  y={160 - unpaidHeight}
                                 textAnchor="middle"
                                 fill="#475569"
                                 className="text-[8px] font-black"
@@ -967,13 +1264,11 @@ function App() {
                         );
                       })}
                       
-                      {/* Base axis line */}
                       <line x1="30" y1="172" x2="430" y2="172" stroke="#cbd5e1" strokeWidth="1.5" />
                     </svg>
                   </div>
                 </div>
 
-                {/* Chart 2: Status Donut Chart (Span 1 column) */}
                 <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm flex flex-col justify-between space-y-4">
                   <div className="pb-2 border-b border-slate-50">
                     <h4 className="font-bold text-slate-800 text-sm">Distribuição de Recebíveis</h4>
@@ -986,10 +1281,8 @@ function App() {
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center gap-4">
-                      {/* SVG Donut Circle */}
                       <div className="relative w-36 h-36">
                         <svg viewBox="0 0 200 200" className="w-full h-full">
-                          {/* Circular background track */}
                           <circle
                             cx="100"
                             cy="100"
@@ -998,7 +1291,6 @@ function App() {
                             stroke="#f1f5f9"
                             strokeWidth="20"
                           />
-                          {/* Paid segment (Green) */}
                           {totalPaid > 0 && (
                             <circle
                               cx="100"
@@ -1012,7 +1304,6 @@ function App() {
                               transform="rotate(-90 100 100)"
                             />
                           )}
-                          {/* A Vencer segment (Slate/blue) */}
                           {totalA_Vencer > 0 && (
                             <circle
                               cx="100"
@@ -1026,7 +1317,6 @@ function App() {
                               transform="rotate(-90 100 100)"
                             />
                           )}
-                          {/* Vencido segment (Red) */}
                           {totalVencido > 0 && (
                             <circle
                               cx="100"
@@ -1041,7 +1331,6 @@ function App() {
                             />
                           )}
                           
-                          {/* Center Text Indicator */}
                           <text x="100" y="95" textAnchor="middle" fill="#94a3b8" className="text-[11px] uppercase tracking-wider font-bold">Total</text>
                           <text x="100" y="120" textAnchor="middle" fill="#1e293b" className="text-[17px] font-black tracking-tighter">
                             {totalBilled >= 1000 ? `${(totalBilled/1000).toFixed(1)}k` : totalBilled.toFixed(0)}
@@ -1049,7 +1338,6 @@ function App() {
                         </svg>
                       </div>
 
-                      {/* Custom list layout for Donut labels */}
                       <div className="w-full grid grid-cols-3 gap-2 text-center">
                         <div className="space-y-0.5">
                           <span className="text-[9px] font-bold text-slate-400 uppercase">Pago</span>
@@ -1067,13 +1355,10 @@ function App() {
                     </div>
                   )}
                 </div>
-
               </div>
 
               {/* CARD CONTAINER MATRIX: Virtual Card (Left) & Upcoming Receivables (Right) */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Virtual Card (Span 1 column) */}
                 <div className="space-y-3.5">
                   <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Minha Chave Receptora Principal</h4>
                   <VirtualCard 
@@ -1082,7 +1367,6 @@ function App() {
                   />
                 </div>
 
-                {/* Upcoming Receivables (Span 2 columns) */}
                 <div className="lg:col-span-2 space-y-3.5">
                   <div className="flex justify-between items-center">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Próximos Vencimentos</h4>
@@ -1149,9 +1433,7 @@ function App() {
                     )}
                   </div>
                 </div>
-
               </div>
-
             </div>
           </div>
         )}
@@ -1173,14 +1455,12 @@ function App() {
             />
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
-              {/* Store Workspace Header */}
               {(() => {
                 const currentStore = stores.find(s => s.id === activeStoreId);
                 const colorGradient = currentStore?.color || 'from-blue-600 to-indigo-700';
                 
                 return (
                   <div className="bg-white border-b border-slate-100 flex-shrink-0 flex flex-col">
-                    {/* Store Title Bar */}
                     <div className="p-5 flex items-center justify-between border-b border-slate-50">
                       <div className="flex items-center gap-3">
                         <button
@@ -1199,7 +1479,6 @@ function App() {
                         </div>
                       </div>
                       
-                      {/* Quick store switcher dropdown */}
                       <select
                         value={activeStoreId}
                         onChange={(e) => setActiveStoreId(e.target.value)}
@@ -1211,7 +1490,6 @@ function App() {
                       </select>
                     </div>
 
-                    {/* Horizontal Sub Tabs Navigation */}
                     <div className="flex px-5 bg-white">
                       {([
                         { id: 'orders', label: 'Pedidos', icon: ShoppingCart },
@@ -1241,7 +1519,6 @@ function App() {
                 );
               })()}
 
-              {/* Render Selected Sub Tab Workspace Component */}
               <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
                 {activeSubTab === 'orders' && (
                   <OrderManager
@@ -1268,6 +1545,7 @@ function App() {
                     onUpdateInstallmentStatus={handleUpdateInstallmentStatus}
                     onNavigateToKeys={() => setActiveTab('wallets')}
                     onNavigateToClients={() => setActiveSubTab('clients')}
+                    routingSettings={routingSettings}
                   />
                 )}
 
@@ -1305,7 +1583,7 @@ function App() {
         )}
       </main>
 
-      {/* Online Customer Storefront Simulator Overlay */}
+      {/* Simulador de Loja pública do comprador */}
       {isStorefrontOpen && activeStoreId && (
         <StorefrontSimulator
           store={stores.find(s => s.id === activeStoreId)!}
@@ -1322,10 +1600,12 @@ function App() {
               handleUpdateInstallmentStatus(invoiceId, invObj.installments[0].id, 'PAGO');
             }
           }}
+          routingSettings={routingSettings}
+          merchantWallets={savedKeys}
         />
       )}
 
-      {/* BOTTOM TAB NAVIGATION BAR (Mobile Menu) */}
+      {/* MOBILE TAB MENU */}
       <div className="md:hidden bg-white border-t border-slate-100 py-2.5 px-3 flex justify-between select-none flex-shrink-0 z-20 shadow-md">
         {menuItems.map(item => {
           const Icon = item.icon;
@@ -1339,7 +1619,7 @@ function App() {
               }`}
             >
               <Icon className="w-5 h-5" />
-              <span className="text-[8px] font-bold">{item.label.split('/')[0]}</span>
+              <span className="text-[8px] font-bold">{item.label}</span>
             </button>
           );
         })}
@@ -1349,4 +1629,23 @@ function App() {
   );
 }
 
-export default App;
+// Componente Root com Provedor de Rotas
+export default function AppRouter() {
+  if (!isSupabaseConfigured) {
+    return <SupabaseSetupScreen />;
+  }
+
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/admin" element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />
+          <Route path="/app" element={<PrivateRoute><MandaPixApp /></PrivateRoute>} />
+          <Route path="/*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}

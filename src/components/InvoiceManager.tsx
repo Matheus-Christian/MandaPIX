@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard } from 'lucide-react';
-import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload } from '../utils/pix';
+import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload, routePixPayment } from '../utils/pix';
 import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
@@ -16,6 +16,7 @@ interface InvoiceManagerProps {
   onUpdateInstallmentStatus: (invoiceId: string, installmentId: string, status: 'PAGO' | 'PENDENTE', paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD') => void;
   onNavigateToKeys: () => void;
   onNavigateToClients: () => void;
+  routingSettings?: any;
 }
 
 export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
@@ -30,6 +31,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   onUpdateInstallmentStatus,
   onNavigateToKeys,
   onNavigateToClients,
+  routingSettings,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PAGO' | 'A_VENCER' | 'VENCIDO'>('TODOS');
@@ -83,6 +85,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     }
 
     const key = savedKeys.find(k => k.id === editPixKeyId) || savedKeys[0];
+    let totalFee = 0;
+    let routedGatewayName: string | undefined = undefined;
+
     const updatedInstallments = editInstallments.map(inst => {
       const original = selectedInvoice.installments.find(o => o.id === inst.id);
       const amountChanged = !original || original.amount !== inst.amount;
@@ -90,19 +95,61 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       const keyChanged = selectedInvoice.pixKeyId !== editPixKeyId;
 
       if (inst.status === 'PENDENTE' && (amountChanged || dueDateChanged || keyChanged)) {
-        const payload = key.walletType === 'PIX'
-          ? generatePixPayload({
-              key: key.key,
-              keyType: key.type,
-              name: key.name,
-              city: key.city,
-              amount: inst.amount,
-              description: `#${selectedInvoice.invoiceNumber} P${inst.number}`.substring(0, 72)
-            })
-          : `card_payment_token_${Date.now()}_${inst.amount}`;
-        return { ...inst, pixPayload: payload };
+        let pixPayload = '';
+        let instGateway = undefined;
+        let instFee = undefined;
+        let instAmount = inst.amount;
+
+        if (key.walletType === 'PIX') {
+          pixPayload = generatePixPayload({
+            key: key.key,
+            keyType: key.type,
+            name: key.name,
+            city: key.city,
+            amount: inst.amount,
+            description: `#${selectedInvoice.invoiceNumber} P${inst.number}`.substring(0, 72)
+          });
+        } else if (key.walletType === 'PIX_AUTO') {
+          const route = routePixPayment(inst.amount, routingSettings || {
+            threshold: 100,
+            below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+            above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+          });
+          
+          instGateway = route.gateway;
+          instFee = route.fee;
+          instAmount = route.total;
+
+          pixPayload = generatePixPayload({
+            key: route.key,
+            keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
+            name: `MandaPIX Central (${route.gateway})`,
+            city: 'SAO PAULO',
+            amount: route.total,
+            description: `#${selectedInvoice.invoiceNumber} P${inst.number}`.substring(0, 72)
+          });
+          
+          totalFee += route.fee;
+          routedGatewayName = route.gateway;
+        } else {
+          pixPayload = `card_payment_token_${Date.now()}_${inst.amount}`;
+        }
+
+        return { 
+          ...inst, 
+          amount: instAmount, 
+          pixPayload,
+          paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
+          routedGateway: instGateway,
+          transactionFee: instFee
+        } as any;
+      } else {
+        if (inst.status === 'PAGO' && (inst as any).transactionFee) {
+          totalFee += (inst as any).transactionFee;
+          routedGatewayName = (inst as any).routedGateway;
+        }
+        return inst;
       }
-      return inst;
     });
 
     const newTotal = updatedInstallments.reduce((sum, i) => sum + i.amount, 0);
@@ -112,9 +159,13 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       clientId: editClientId,
       description: editDescription.trim(),
       pixKeyId: editPixKeyId,
+      walletId: editPixKeyId,
       totalAmount: parseFloat(newTotal.toFixed(2)),
-      installments: updatedInstallments
-    };
+      paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
+      installments: updatedInstallments,
+      routedGateway: routedGatewayName,
+      transactionFee: totalFee > 0 ? parseFloat(totalFee.toFixed(2)) : undefined
+    } as any;
 
     onEditInvoice(updatedInvoice);
     setSelectedInvoice(updatedInvoice);
@@ -166,6 +217,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   const [productServiceId, setProductServiceId] = useState('manual');
   const [description, setDescription] = useState('');
   const [amountRaw, setAmountRaw] = useState('');
+  const [entryAmountRaw, setEntryAmountRaw] = useState('');
   const [installmentsCount, setInstallmentsCount] = useState(1);
   const [pixKeyId, setPixKeyId] = useState('');
   const [firstDueDate, setFirstDueDate] = useState(() => {
@@ -205,6 +257,13 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     const formatted = formatCurrencyInput(rawVal);
     setAmountRaw(formatted);
     if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
+  };
+
+  const handleEntryAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawVal = e.target.value;
+    const formatted = formatCurrencyInput(rawVal);
+    setEntryAmountRaw(formatted);
+    if (errors.entryAmount) setErrors(prev => ({ ...prev, entryAmount: '' }));
   };
 
   // Helper to check installment status
@@ -336,7 +395,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       
       const activeInvoice = invoices.find(inv => inv.id === activeInstallment?.invoiceId);
       const activeWallet = activeInvoice ? savedKeys.find(w => w.id === activeInvoice.pixKeyId) : null;
-      const paymentMethod = activeWallet ? activeWallet.walletType : 'CREDIT_CARD';
+      const paymentMethod = (activeWallet 
+        ? (activeWallet.walletType === 'PIX_AUTO' ? 'PIX' : activeWallet.walletType) 
+        : 'CREDIT_CARD') as 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
 
       // Complete simulation payment
       handleSimulatePayment(paymentMethod);
@@ -358,7 +419,11 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     if (!description.trim()) newErrors.description = 'A descrição do faturamento é obrigatória';
     
     const amountVal = parseBRLToNumber(amountRaw);
+    const entryVal = entryAmountRaw ? parseBRLToNumber(entryAmountRaw) : 0;
+
     if (amountVal <= 0) newErrors.amount = 'O valor total deve ser maior que R$ 0,00';
+    if (entryVal < 0) newErrors.entryAmount = 'O valor de entrada não pode ser negativo';
+    if (entryVal >= amountVal) newErrors.entryAmount = 'O valor de entrada deve ser menor que o valor total';
     if (!pixKeyId) newErrors.pixKey = 'Selecione uma chave PIX para receber';
     if (!firstDueDate) newErrors.dueDate = 'Data de vencimento é obrigatória';
 
@@ -368,48 +433,149 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     }
 
     const key = savedKeys.find(k => k.id === pixKeyId)!;
-    const total = amountVal;
     
     // Generate Installments
     const newInstallments: Installment[] = [];
-    const installmentValue = parseFloat((total / installmentsCount).toFixed(2));
     const firstDate = new Date(firstDueDate + 'T12:00:00');
 
+    let finalTotalAmount = 0;
+    let totalFee = 0;
+    let routedGatewayName: string | undefined = undefined;
+
+    const invoiceNum = invoices.length > 0 
+      ? String(Math.max(...invoices.map(inv => parseInt(inv.invoiceNumber) || 1000)) + 1)
+      : '1001';
+
+    // 1. Entrada (se houver)
+    if (entryVal > 0) {
+      const todayString = new Date().toISOString().split('T')[0];
+      let pixPayload = '';
+      let instGateway = undefined;
+      let instFee = undefined;
+      let instAmount = entryVal;
+
+      if (key.walletType === 'PIX') {
+        pixPayload = generatePixPayload({
+          key: key.key,
+          keyType: key.type,
+          name: key.name,
+          city: key.city,
+          amount: instAmount,
+          description: `#${invoiceNum} Entrada`.substring(0, 72)
+        });
+        finalTotalAmount += instAmount;
+      } else if (key.walletType === 'PIX_AUTO') {
+        const route = routePixPayment(instAmount, routingSettings || {
+          threshold: 100,
+          below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+          above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+        });
+
+        instGateway = route.gateway;
+        instFee = route.fee;
+        instAmount = route.total;
+        
+        pixPayload = generatePixPayload({
+          key: route.key,
+          keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
+          name: `MandaPIX Central (${route.gateway})`,
+          city: 'SAO PAULO',
+          amount: route.total,
+          description: `#${invoiceNum} Entrada`.substring(0, 72)
+        });
+
+        finalTotalAmount += route.total;
+        totalFee += route.fee;
+        routedGatewayName = route.gateway;
+      } else {
+        pixPayload = `card_payment_token_${Date.now()}_entry_${instAmount}`;
+        finalTotalAmount += instAmount;
+      }
+
+      newInstallments.push({
+        id: `inst-${Date.now()}-entry`,
+        number: 1,
+        amount: instAmount,
+        dueDate: todayString,
+        status: 'PENDENTE',
+        pixPayload,
+        paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
+        routedGateway: instGateway,
+        transactionFee: instFee
+      } as any);
+    }
+
+    // 2. Parcelas restantes
+    const totalRemaining = amountVal - entryVal;
+    const installmentValue = parseFloat((totalRemaining / installmentsCount).toFixed(2));
+
     for (let i = 1; i <= installmentsCount; i++) {
-      // Calculate due date (add i-1 months)
+      const installmentNumber = entryVal > 0 ? (i + 1) : i;
       const dueDateObj = new Date(firstDate);
       dueDateObj.setMonth(firstDate.getMonth() + (i - 1));
       
       const dueDateString = dueDateObj.toISOString().split('T')[0];
-      const instAmount = i === installmentsCount 
-        ? parseFloat((total - (installmentValue * (installmentsCount - 1))).toFixed(2)) // Adjust last rounding cents
+      let instAmount = i === installmentsCount 
+        ? parseFloat((totalRemaining - (installmentValue * (installmentsCount - 1))).toFixed(2)) // Adjust last rounding cents
         : installmentValue;
 
-      const invoiceNum = invoices.length > 0 
-        ? String(Math.max(...invoices.map(inv => parseInt(inv.invoiceNumber) || 1000)) + 1)
-        : '1001';
+      let pixPayload = '';
+      let instGateway = undefined;
+      let instFee = undefined;
 
-      // Generate individual PIX payload
-      const pixPayload = key.walletType === 'PIX'
-        ? generatePixPayload({
-            key: key.key,
-            keyType: key.type,
-            name: key.name,
-            city: key.city,
-            amount: instAmount,
-            description: `#${invoiceNum} Parc ${i}/${installmentsCount}`.substring(0, 72)
-          })
-        : `card_payment_token_${Date.now()}_${instAmount}`;
+      const descLabel = entryVal > 0 
+        ? `#${invoiceNum} Parc ${i}/${installmentsCount}`
+        : `#${invoiceNum} Parc ${i}/${installmentsCount}`;
+
+      if (key.walletType === 'PIX') {
+        pixPayload = generatePixPayload({
+          key: key.key,
+          keyType: key.type,
+          name: key.name,
+          city: key.city,
+          amount: instAmount,
+          description: descLabel.substring(0, 72)
+        });
+        finalTotalAmount += instAmount;
+      } else if (key.walletType === 'PIX_AUTO') {
+        const route = routePixPayment(instAmount, routingSettings || {
+          threshold: 100,
+          below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+          above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+        });
+
+        instGateway = route.gateway;
+        instFee = route.fee;
+        instAmount = route.total;
+        
+        pixPayload = generatePixPayload({
+          key: route.key,
+          keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
+          name: `MandaPIX Central (${route.gateway})`,
+          city: 'SAO PAULO',
+          amount: route.total,
+          description: descLabel.substring(0, 72)
+        });
+
+        finalTotalAmount += route.total;
+        totalFee += route.fee;
+        routedGatewayName = route.gateway;
+      } else {
+        pixPayload = `card_payment_token_${Date.now()}_${instAmount}`;
+        finalTotalAmount += instAmount;
+      }
 
       newInstallments.push({
-        id: `inst-${Date.now()}-${i}`,
-        number: i,
+        id: `inst-${Date.now()}-${installmentNumber}`,
+        number: installmentNumber,
         amount: instAmount,
         dueDate: dueDateString,
         status: 'PENDENTE',
         pixPayload,
-        paymentMethodUsed: key.walletType
-      });
+        paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
+        routedGateway: instGateway,
+        transactionFee: instFee
+      } as any);
     }
 
     const newInvoiceNum = invoices.length > 0 
@@ -422,14 +588,16 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       clientId,
       productServiceId: productServiceId === 'manual' ? undefined : productServiceId,
       description: description.trim(),
-      totalAmount: total,
+      totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
       dateCreated: new Date().toISOString().split('T')[0],
-      installmentsCount,
+      installmentsCount: entryVal > 0 ? installmentsCount + 1 : installmentsCount,
       pixKeyId,
       walletId: pixKeyId,
-      paymentMethodUsed: key.walletType,
-      installments: newInstallments
-    };
+      paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
+      installments: newInstallments,
+      routedGateway: routedGatewayName,
+      transactionFee: totalFee > 0 ? parseFloat(totalFee.toFixed(2)) : undefined
+    } as any;
 
     onAddInvoice(newInvoice);
 
@@ -438,6 +606,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     setProductServiceId('manual');
     setDescription('');
     setAmountRaw('');
+    setEntryAmountRaw('');
     setInstallmentsCount(1);
     setErrors({});
     setIsAdding(false);
@@ -496,7 +665,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       <div className="p-6 bg-white border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4 flex-shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <History className="w-6 h-6 text-pix" /> Cobranças e Títulos
+            <History className="w-6 h-6 text-pix" /> Gerenciar Vendas
           </h2>
           <p className="text-xs text-slate-500 mt-1 font-medium">Controle de faturamentos, parcelamento e recebíveis dos clientes</p>
         </div>
@@ -505,7 +674,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
             onClick={() => setIsAdding(true)}
             className="flex items-center justify-center gap-1.5 bg-pix hover:bg-pix-dark text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95 self-start md:self-auto"
           >
-            <Plus className="w-4 h-4" /> Emitir Cobrança
+            <Plus className="w-4 h-4" /> Gerar pedido
           </button>
         )}
       </div>
@@ -516,7 +685,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
           /* NEW BILLING FORM */
           <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm max-w-2xl mx-auto animate-fade-in">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-slate-800 text-lg">Nova Cobrança</h3>
+              <h3 className="font-bold text-slate-800 text-lg">Novo Pedido</h3>
               <button
                 onClick={() => { setIsAdding(false); setErrors({}); }}
                 className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-50"
@@ -611,7 +780,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                   {errors.description && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.description}</p>}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Total Value */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Valor Total Cobrado</label>
@@ -628,6 +797,22 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                     {errors.amount && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.amount}</p>}
                   </div>
 
+                  {/* Valor de Entrada */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Valor de Entrada (Opcional)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        value={entryAmountRaw}
+                        onChange={handleEntryAmountChange}
+                        className={`w-full pl-9 pr-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.entryAmount ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                      />
+                    </div>
+                    {errors.entryAmount && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.entryAmount}</p>}
+                  </div>
+
                   {/* Installments Count */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Parcelamento</label>
@@ -639,7 +824,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                       <option value={1}>À vista (1x)</option>
                       {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => {
                         const totalVal = parseBRLToNumber(amountRaw);
-                        const valuePerInstallment = totalVal > 0 ? (totalVal / n) : 0;
+                        const entryVal = entryAmountRaw ? parseBRLToNumber(entryAmountRaw) : 0;
+                        const remainingVal = totalVal - entryVal;
+                        const valuePerInstallment = remainingVal > 0 ? (remainingVal / n) : 0;
                         return (
                           <option key={n} value={n}>
                             {n}x de R$ {valuePerInstallment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -660,7 +847,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                       className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.pixKey ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
                     >
                       {savedKeys.map(k => (
-                        <option key={k.id} value={k.id}>{k.label} ({k.key})</option>
+                        <option key={k.id} value={k.id}>
+                          {k.label} {k.walletType === 'PIX_AUTO' ? '(PIX Automatizado + Taxas)' : `(${k.key})`}
+                        </option>
                       ))}
                     </select>
                     {errors.pixKey && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.pixKey}</p>}
@@ -684,7 +873,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                     type="submit"
                     className="w-full bg-pix hover:bg-pix-dark text-white py-3 rounded-xl font-bold transition-all shadow-md shadow-pix/10 active:scale-98 text-sm flex items-center justify-center gap-1"
                   >
-                    Gerar Cobrança e Títulos <ArrowRight className="w-4 h-4" />
+                    Gerar Pedido <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               </form>
@@ -796,6 +985,15 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                           <span className="font-extrabold text-slate-800 text-base">{formatBRL(inv.totalAmount)}</span>
                         </div>
                         
+                        {(inv as any).routedGateway && (
+                          <div className="flex flex-col items-end">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Taxa Roteamento</span>
+                            <span className="text-[11px] font-bold text-teal-600 bg-teal-50/50 border border-teal-100 px-1.5 py-0.5 rounded-md">
+                              {formatBRL((inv as any).transactionFee || 0)} ({(inv as any).routedGateway})
+                            </span>
+                          </div>
+                        )}
+                        
                         <div className="flex items-center gap-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); setSelectedInvoice(inv); }}
@@ -899,7 +1097,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                       className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 shadow-sm"
                     >
                       {savedKeys.map(k => (
-                        <option key={k.id} value={k.id}>{k.label} ({k.key})</option>
+                        <option key={k.id} value={k.id}>
+                          {k.label} {k.walletType === 'PIX_AUTO' ? '(PIX Automatizado + Taxas)' : `(${k.key})`}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -991,6 +1191,19 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                         <p className="font-semibold text-slate-700 text-sm mt-0.5">{new Date(selectedInvoice.dateCreated + 'T12:00:00').toLocaleDateString('pt-BR')}</p>
                       </div>
                     </div>
+
+                    {(selectedInvoice as any).routedGateway && (
+                      <div className="grid grid-cols-2 gap-4 border-t border-slate-50 pt-2.5">
+                        <div>
+                          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Gateway Roteado</span>
+                          <p className="font-bold text-pix text-xs mt-0.5">{(selectedInvoice as any).routedGateway}</p>
+                        </div>
+                        <div>
+                          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Taxa Roteamento</span>
+                          <p className="font-bold text-slate-700 text-xs mt-0.5">{formatBRL((selectedInvoice as any).transactionFee || 0)}</p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="border-t border-slate-50 pt-2.5">
                       <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">Descrição do Contrato</span>
@@ -1135,7 +1348,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                 </div>
 
                 {activeInstallment.installment.status !== 'PAGO' ? (
-                  activeWalletType === 'PIX' ? (
+                  (activeWalletType === 'PIX' || activeWalletType === 'PIX_AUTO') ? (
                     <>
                       {/* Canvas QR Code */}
                       <div className="p-3 bg-white rounded-2xl border border-slate-100 shadow-inner relative">

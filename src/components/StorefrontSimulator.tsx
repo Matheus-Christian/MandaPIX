@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ShoppingBag, ShoppingCart, Trash2, Plus, Minus, X, Check, Copy, AlertCircle, CreditCard } from 'lucide-react';
-import { formatBRL } from '../utils/pix';
-import type { Store, Catalog, ProductService } from '../utils/pix';
+import { formatBRL, routePixPayment } from '../utils/pix';
+import type { Store, Catalog, ProductService, SavedPixKey } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
 interface StorefrontSimulatorProps {
@@ -15,9 +15,17 @@ interface StorefrontSimulatorProps {
     clientPhone: string;
     items: Array<{ productServiceId: string; quantity: number }>;
     paymentMethod?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
-  }) => Promise<{ orderNumber: string; pixPayload: string; invoiceId: string }>;
+  }) => Promise<{ 
+    orderNumber: string; 
+    pixPayload: string; 
+    invoiceId: string;
+    routedGateway?: string | null;
+    transactionFee?: number | null;
+  }>;
   onClose: () => void;
   onSimulatePayment: (invoiceId: string) => void;
+  routingSettings?: any;
+  merchantWallets?: SavedPixKey[];
 }
 
 interface CartItem {
@@ -31,7 +39,9 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
   products,
   onPlaceOrder,
   onClose,
-  onSimulatePayment
+  onSimulatePayment,
+  routingSettings,
+  merchantWallets
 }) => {
   // Navigation & Category Selection
   const [selectedCatalogId, setSelectedCatalogId] = useState<string>('ALL');
@@ -61,6 +71,8 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
     orderNumber: string;
     pixPayload: string;
     invoiceId: string;
+    routedGateway?: string | null;
+    transactionFee?: number | null;
   } | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [isPaymentSimulated, setIsPaymentSimulated] = useState(false);
@@ -290,6 +302,36 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
     setIsPaymentSimulated(true);
   };
 
+  const getActiveWallet = (method: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD') => {
+    if (!merchantWallets || merchantWallets.length === 0) return null;
+    if (method === 'PIX') {
+      return (
+        merchantWallets.find(k => k.walletType === 'PIX_AUTO') ||
+        merchantWallets.find(k => k.walletType === 'PIX') ||
+        merchantWallets.find(k => k.isPrimary) ||
+        merchantWallets[0]
+      );
+    } else {
+      return (
+        merchantWallets.find(k => k.walletType === method) ||
+        merchantWallets.find(k => k.isPrimary) ||
+        merchantWallets[0]
+      );
+    }
+  };
+
+  const activeWallet = getActiveWallet(paymentMethod);
+  const isPixAuto = activeWallet?.walletType === 'PIX_AUTO';
+  const cartTotal = getCartTotal();
+
+  const routeDetails = isPixAuto && paymentMethod === 'PIX'
+    ? routePixPayment(cartTotal, routingSettings || {
+        threshold: 100,
+        below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+        above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+      })
+    : null;
+
   // Filter Catalog & Search
   const filteredProducts = products.filter(p => {
     const matchesCatalog = selectedCatalogId === 'ALL' || p.catalogId === selectedCatalogId;
@@ -492,9 +534,23 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
                   </div>
 
                   {/* Summary Block */}
-                  <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-xs flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>TOTAL COMPRADO</span>
-                    <span className="text-base text-pix font-black">{formatBRL(getCartTotal())}</span>
+                  <div className="bg-white rounded-2xl border border-slate-150 p-4 shadow-xs space-y-2 text-xs text-slate-800">
+                    <div className="flex items-center justify-between font-bold">
+                      <span>Subtotal</span>
+                      <span>{formatBRL(cartTotal)}</span>
+                    </div>
+                    {isPixAuto && paymentMethod === 'PIX' && routeDetails && (
+                      <div className="flex items-center justify-between text-teal-650 font-semibold">
+                        <span>Taxa de Roteamento (PIX Auto - {routeDetails.gateway})</span>
+                        <span>{formatBRL(routeDetails.fee)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between font-black border-t border-slate-100 pt-2 text-sm">
+                      <span>TOTAL COMPRADO</span>
+                      <span className="text-base text-pix">
+                        {formatBRL(isPixAuto && paymentMethod === 'PIX' && routeDetails ? routeDetails.total : cartTotal)}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Customer Information (Checkout Form) */}
@@ -670,7 +726,9 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
                           </>
                         ) : (
                           <span>
-                            {paymentMethod === 'PIX' ? 'Confirmar Pedido & Pagar PIX' : `Pagar ${formatBRL(getCartTotal())} no ${paymentMethod === 'CREDIT_CARD' ? 'Crédito' : 'Débito'}`}
+                            {paymentMethod === 'PIX'
+                              ? `Confirmar Pedido & Pagar ${formatBRL(isPixAuto && routeDetails ? routeDetails.total : cartTotal)} no PIX`
+                              : `Pagar ${formatBRL(cartTotal)} no ${paymentMethod === 'CREDIT_CARD' ? 'Crédito' : 'Débito'}`}
                           </span>
                         )}
                       </button>
@@ -720,6 +778,20 @@ export const StorefrontSimulator: React.FC<StorefrontSimulatorProps> = ({
                 <span className="text-[10px] font-bold text-slate-400 uppercase">Número do Pedido</span>
                 <p className="font-extrabold text-slate-800 text-base">#{checkoutResult.orderNumber}</p>
               </div>
+
+              {/* Roteamento e Taxa PIX_AUTO no Sucesso */}
+              {(checkoutResult as any).routedGateway && (
+                <div className="w-full bg-teal-50/50 border border-teal-100/80 rounded-2xl p-3 text-xs text-slate-600 space-y-1.5 shadow-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Gateway Roteado</span>
+                    <span className="font-bold text-teal-700">{(checkoutResult as any).routedGateway}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Taxa de Processamento</span>
+                    <span className="font-bold text-teal-700">{formatBRL((checkoutResult as any).transactionFee || 0)}</span>
+                  </div>
+                </div>
+              )}
 
               {paymentMethod === 'PIX' ? (
                 <>

@@ -1,49 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Star, X, Wallet as WalletIcon, ShieldCheck, CreditCard } from 'lucide-react';
-import { validatePixKey, maskPixKey, BANKS, DEFAULT_KEYS } from '../utils/pix';
+import { validatePixKey, maskPixKey, BANKS } from '../utils/pix';
 import type { PixKeyType, Wallet, WalletType } from '../utils/pix';
+import { supabase } from '../utils/supabaseClient';
 
 interface SavedKeysProps {
   onKeysChanged?: (keys: Wallet[]) => void;
 }
 
+// Helpers para conversão entre camelCase (JS) e snake_case (Postgres)
+const mapFromDB = (db: any): Wallet => ({
+  id: db.id,
+  walletType: db.wallet_type as WalletType,
+  label: db.label,
+  bankName: db.bank_name,
+  isPrimary: db.is_primary,
+  type: db.type as PixKeyType,
+  key: db.key,
+  name: db.name,
+  city: db.city,
+  cardProvider: db.card_provider,
+  accountIdentifier: db.account_identifier,
+});
+
+const mapToDB = (wallet: Omit<Wallet, 'id'> & { id?: string }) => ({
+  id: wallet.id,
+  wallet_type: wallet.walletType,
+  label: wallet.label,
+  bank_name: wallet.bankName,
+  is_primary: wallet.isPrimary,
+  type: wallet.type,
+  key: wallet.key,
+  name: wallet.name,
+  city: wallet.city,
+  card_provider: wallet.cardProvider,
+  account_identifier: wallet.accountIdentifier,
+});
+
 export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
-  const [keys, setKeys] = useState<Wallet[]>(() => {
-    // Legacy migration check in state initialiser
-    const storedWallets = localStorage.getItem('mandapix_saved_wallets');
-    if (storedWallets) {
-      try {
-        return JSON.parse(storedWallets) as Wallet[];
-      } catch (e) {
-        console.error('Erro ao ler carteiras do localStorage', e);
-      }
-    }
-    
-    const storedKeys = localStorage.getItem('mandapix_saved_keys');
-    if (storedKeys) {
-      try {
-        const parsed = JSON.parse(storedKeys) as any[];
-        const migrated = parsed.map(k => ({
-          ...k,
-          walletType: k.walletType || 'PIX'
-        })) as Wallet[];
-        localStorage.setItem('mandapix_saved_wallets', JSON.stringify(migrated));
-        return migrated;
-      } catch (e) {
-        console.error('Erro ao migrar chaves legadas', e);
-      }
-    }
-    
-    // Add default credit card and debit card wallets by default
-    const defaults: Wallet[] = DEFAULT_KEYS.map(k => ({
-      ...k,
-      walletType: k.walletType || 'PIX'
-    }));
-    
-    localStorage.setItem('mandapix_saved_wallets', JSON.stringify(defaults));
-    return defaults;
-  });
-  
+  const [keys, setKeys] = useState<Wallet[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   
   // Form State
@@ -60,20 +56,34 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
   // Errors state
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
-  useEffect(() => {
-    if (onKeysChanged) {
-      onKeysChanged(keys);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys]);
+  // Carregar carteiras do Supabase
+  const loadKeys = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('wallets')
+        .select('*')
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true });
 
-  const saveKeys = (newKeys: Wallet[]) => {
-    setKeys(newKeys);
-    localStorage.setItem('mandapix_saved_wallets', JSON.stringify(newKeys));
-    // Also save to mandapix_saved_keys to preserve compatibility with legacy loaders
-    localStorage.setItem('mandapix_saved_keys', JSON.stringify(newKeys));
-    if (onKeysChanged) onKeysChanged(newKeys);
+      if (error) throw error;
+      
+      const mapped = (data || []).map(mapFromDB);
+      setKeys(mapped);
+      if (onKeysChanged) {
+        onKeysChanged(mapped);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar carteiras do banco de dados:', err);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    loadKeys();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleKeyInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawVal = e.target.value;
@@ -87,57 +97,89 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value as PixKeyType;
     setType(newType);
-    setKeyValue(''); // Clear value since mask will change
+    setKeyValue('');
     setErrors(prev => ({ ...prev, key: '' }));
   };
 
-  const handleSetPrimary = (id: string) => {
-    const updated = keys.map(k => ({
-      ...k,
-      isPrimary: k.id === id
-    }));
-    saveKeys(updated);
+  const handleSetPrimary = async (id: string) => {
+    try {
+      // 1. Atualizar todas para falso no banco
+      const { error: resetError } = await supabase
+        .from('wallets')
+        .update({ is_primary: false })
+        .eq('is_primary', true); // Apenas as que eram principais
+      
+      if (resetError) throw resetError;
+
+      // 2. Atualizar a escolhida para verdadeira
+      const { error: setError } = await supabase
+        .from('wallets')
+        .update({ is_primary: true })
+        .eq('id', id);
+
+      if (setError) throw setError;
+
+      await loadKeys();
+    } catch (err) {
+      console.error('Erro ao definir carteira principal:', err);
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     const targetKey = keys.find(k => k.id === id);
     if (!targetKey) return;
 
     if (confirm(`Deseja mesmo remover a carteira "${targetKey.label}"?`)) {
-      const updated = keys.filter(k => k.id !== id);
-      
-      // If deleted primary and list is not empty, set the first as primary
-      if (targetKey.isPrimary && updated.length > 0) {
-        updated[0] = { ...updated[0], isPrimary: true };
+      try {
+        const { error } = await supabase
+          .from('wallets')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        // Se era principal e sobrou algum item, define o primeiro como principal
+        const remaining = keys.filter(k => k.id !== id);
+        if (targetKey.isPrimary && remaining.length > 0) {
+          const first = remaining[0];
+          await supabase
+            .from('wallets')
+            .update({ is_primary: true })
+            .eq('id', first.id);
+        }
+
+        await loadKeys();
+      } catch (err) {
+        console.error('Erro ao deletar carteira:', err);
       }
-      
-      saveKeys(updated);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: { [key: string]: string } = {};
 
-    // Validate Label
+    // Validar Label
     if (!label.trim()) newErrors.label = 'O apelido é obrigatório';
 
     if (walletType === 'PIX') {
-      // Validate Receiver Name
+      // Validar Nome Recebedor
       if (!receiverName.trim()) newErrors.name = 'O nome do recebedor é obrigatório';
       else if (receiverName.trim().length < 3) newErrors.name = 'Nome deve ter no mínimo 3 caracteres';
 
-      // Validate Receiver City
+      // Validar Cidade
       if (!receiverCity.trim()) newErrors.city = 'A cidade é obrigatória';
       else if (receiverCity.trim().length < 2) newErrors.city = 'Cidade inválida';
 
-      // Validate Key Value
+      // Validar Chave
       const validation = validatePixKey(type, keyValue);
       if (!validation.isValid) {
         newErrors.key = validation.error || 'Chave inválida';
       }
+    } else if (walletType === 'PIX_AUTO') {
+      // Somente o label é obrigatório, já validado acima
     } else {
-      // Validate Card Gateway details
+      // Validar detalhes do cartão
       if (!accountIdentifier.trim()) {
         newErrors.accountIdentifier = 'O identificador da conta é obrigatório';
       }
@@ -148,51 +190,76 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
       return;
     }
 
-    let newWallet: Wallet;
+    try {
+      let walletData: Omit<Wallet, 'id'> & { id?: string };
 
-    if (walletType === 'PIX') {
-      newWallet = {
-        id: `wallet-${Date.now()}`,
-        walletType: 'PIX',
-        type,
-        key: keyValue.trim(),
-        name: receiverName.trim().toUpperCase(),
-        city: receiverCity.trim().toUpperCase(),
-        label: label.trim(),
-        bankName,
-        isPrimary: keys.length === 0,
-      };
-    } else {
-      newWallet = {
-        id: `wallet-${Date.now()}`,
-        walletType,
-        type: 'RANDOM',
-        key: accountIdentifier.trim(),
-        name: label.trim().toUpperCase(),
-        city: 'SAO PAULO',
-        label: label.trim(),
-        bankName: 'Outro',
-        cardProvider,
-        accountIdentifier: accountIdentifier.trim(),
-        isPrimary: keys.length === 0,
-      };
+      if (walletType === 'PIX') {
+        walletData = {
+          id: crypto.randomUUID(),
+          walletType: 'PIX',
+          type,
+          key: keyValue.trim(),
+          name: receiverName.trim().toUpperCase(),
+          city: receiverCity.trim().toUpperCase(),
+          label: label.trim(),
+          bankName,
+          isPrimary: keys.length === 0,
+        };
+      } else if (walletType === 'PIX_AUTO') {
+        walletData = {
+          id: crypto.randomUUID(),
+          walletType: 'PIX_AUTO',
+          type: 'RANDOM',
+          key: 'automatico',
+          name: 'Roteamento MandaPIX',
+          city: 'SAO PAULO',
+          label: label.trim(),
+          bankName: 'MandaPIX',
+          isPrimary: keys.length === 0,
+        };
+      } else {
+        walletData = {
+          id: crypto.randomUUID(),
+          walletType,
+          type: 'RANDOM',
+          key: accountIdentifier.trim(),
+          name: label.trim().toUpperCase(),
+          city: 'SAO PAULO',
+          label: label.trim(),
+          bankName: 'Outro',
+          cardProvider,
+          accountIdentifier: accountIdentifier.trim(),
+          isPrimary: keys.length === 0,
+        };
+      }
+
+      // Salvar no Supabase
+      const { error } = await supabase
+        .from('wallets')
+        .insert([mapToDB(walletData)]);
+
+      if (error) throw error;
+
+      // Resetar Form
+      setLabel('');
+      setKeyValue('');
+      setReceiverName('');
+      setReceiverCity('');
+      setAccountIdentifier('');
+      setWalletType('PIX');
+      setIsAdding(false);
+      setErrors({});
+      
+      await loadKeys();
+    } catch (err) {
+      console.error('Erro ao salvar carteira no Supabase:', err);
     }
-
-    const updated = [...keys, newWallet];
-    saveKeys(updated);
-
-    // Reset Form
-    setLabel('');
-    setKeyValue('');
-    setReceiverName('');
-    setReceiverCity('');
-    setAccountIdentifier('');
-    setWalletType('PIX');
-    setIsAdding(false);
-    setErrors({});
   };
 
   const getBankGradient = (k: Wallet) => {
+    if (k.walletType === 'PIX_AUTO') {
+      return 'from-teal-600 via-teal-750 to-emerald-800';
+    }
     if (k.walletType !== 'PIX') {
       return 'from-slate-800 via-slate-900 to-zinc-950';
     }
@@ -210,7 +277,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
           </h2>
           <p className="text-xs text-slate-500">Gerencie suas chaves PIX e credenciais de cartões para faturamento rápido</p>
         </div>
-        {!isAdding && (
+        {!isAdding && !loading && (
           <button
             onClick={() => setIsAdding(true)}
             className="flex items-center gap-1 bg-pix text-white px-3 py-1.5 rounded-full text-xs font-semibold hover:bg-pix-dark transition-all shadow-md shadow-pix/10 tap-highlight-transparent active:scale-95"
@@ -222,13 +289,18 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-        {isAdding ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="w-8 h-8 border-4 border-pix border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-3">Carregando carteiras...</p>
+          </div>
+        ) : isAdding ? (
           <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm animate-fade-in max-w-2xl mx-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-slate-800 text-sm">Nova Carteira de Recebimento</h3>
               <button 
                 onClick={() => { setIsAdding(false); setErrors({}); }}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-slate-400 hover:text-slate-650 p-1"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -239,7 +311,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Meio de Pagamento / Tipo de Carteira</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['PIX', 'CREDIT_CARD', 'DEBIT_CARD'] as WalletType[]).map((t) => (
+                  {(['PIX', 'PIX_AUTO', 'CREDIT_CARD'] as WalletType[]).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -250,17 +322,22 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                           : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
                       }`}
                     >
-                      {t === 'PIX' && <span className="font-bold">PIX</span>}
+                      {t === 'PIX' && (
+                        <>
+                          <WalletIcon className="w-4 h-4 text-pix" />
+                          <span>PIX Manual</span>
+                        </>
+                      )}
+                      {t === 'PIX_AUTO' && (
+                        <>
+                          <ShieldCheck className="w-4 h-4 text-teal-400" />
+                          <span>PIX Auto + Taxas</span>
+                        </>
+                      )}
                       {t === 'CREDIT_CARD' && (
                         <>
                           <CreditCard className="w-4 h-4" />
                           <span>Crédito</span>
-                        </>
-                      )}
-                      {t === 'DEBIT_CARD' && (
-                        <>
-                          <CreditCard className="w-4 h-4 text-emerald-500" />
-                          <span>Débito</span>
                         </>
                       )}
                     </button>
@@ -343,8 +420,8 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                           type="text"
                           placeholder="Nome titular da conta"
                           value={receiverName}
-                          onChange={(e) => { setReceiverName(e.target.value); setErrors(prev => ({ ...prev, name: '' })); }}
-                          className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.name ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                          onChange={(e) => { setReceiverName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: '' })); }}
+                          className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.name ? 'border-red-450 ring-2 ring-red-100' : 'border-slate-200'}`}
                         />
                         {errors.name && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.name}</p>}
                       </div>
@@ -354,14 +431,31 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                           type="text"
                           placeholder="SAO PAULO"
                           value={receiverCity}
-                          onChange={(e) => { setReceiverCity(e.target.value); setErrors(prev => ({ ...prev, city: '' })); }}
-                          className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.city ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                          onChange={(e) => { setReceiverCity(e.target.value); if (errors.city) setErrors(prev => ({ ...prev, city: '' })); }}
+                          className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.city ? 'border-red-450 ring-2 ring-red-100' : 'border-slate-200'}`}
                         />
                         {errors.city && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.city}</p>}
                       </div>
                     </div>
                   </div>
                 </>
+              ) : walletType === 'PIX_AUTO' ? (
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-150 text-slate-500 text-[11px] leading-relaxed space-y-2">
+                  <p className="font-bold text-slate-700 mb-1 flex items-center gap-1 text-xs">
+                    <ShieldCheck className="w-4 h-4 text-pix" /> PIX Automatizado + Taxas (Recomendado)
+                  </p>
+                  <p>
+                    Esta modalidade utiliza o roteamento inteligente de taxas do MandaPIX através das contas centralizadas dos gateways <strong>Asaas</strong> e <strong>Efí</strong>.
+                  </p>
+                  <p>
+                    <strong>Benefícios:</strong>
+                  </p>
+                  <ul className="list-disc pl-4 space-y-0.5 font-medium">
+                    <li>Roteamento dinâmico automático baseado no valor da venda.</li>
+                    <li>Melhor custo-benefício garantido para cada transação.</li>
+                    <li>Não requer nenhuma chave ou credencial pessoal do lojista.</li>
+                  </ul>
+                </div>
               ) : (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
@@ -444,17 +538,21 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                           </span>
                         )}
                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
-                          k.walletType === 'PIX'
+                          (k.walletType === 'PIX' || k.walletType === 'PIX_AUTO')
                             ? 'bg-teal-50 border-teal-100 text-teal-700'
                             : k.walletType === 'CREDIT_CARD'
                             ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
                             : 'bg-emerald-50 border-emerald-100 text-emerald-700'
                         }`}>
-                          {k.walletType === 'PIX' ? 'PIX' : k.walletType === 'CREDIT_CARD' ? 'Crédito' : 'Débito'}
+                          {(k.walletType === 'PIX' || k.walletType === 'PIX_AUTO') ? 'PIX' : k.walletType === 'CREDIT_CARD' ? 'Crédito' : 'Débito'}
                         </span>
                       </div>
                       <span className="text-[10px] font-semibold text-slate-400">
-                        {k.walletType === 'PIX' ? `${k.bankName} • ${k.type}` : `${k.cardProvider} Gateway`}
+                        {k.walletType === 'PIX' 
+                          ? `${k.bankName} • ${k.type}` 
+                          : k.walletType === 'PIX_AUTO' 
+                          ? 'Roteamento MandaPIX' 
+                          : `${k.cardProvider} Gateway`}
                       </span>
                     </div>
 
@@ -492,6 +590,21 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                         <span className="text-slate-600 font-medium">{k.city}</span>
                       </div>
                     </div>
+                  ) : k.walletType === 'PIX_AUTO' ? (
+                    <div className="mt-2 bg-slate-50 rounded-xl p-2.5 border border-slate-100/50">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Modalidade</span>
+                        <span className="text-slate-750 font-bold text-pix text-right">Automatizado + Taxas</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs mt-1.5">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Gateways</span>
+                        <span className="text-slate-700 font-semibold text-right">Asaas / Efí</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs mt-1">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider text-[9px]">Roteamento</span>
+                        <span className="text-emerald-600 font-bold text-right">Ativo e Otimizado</span>
+                      </div>
+                    </div>
                   ) : (
                     /* Render specialized card detail slots */
                     <div className="mt-2 bg-slate-950 text-white rounded-xl p-3 border border-slate-800 flex flex-col justify-between font-mono relative overflow-hidden h-28 shadow-inner">
@@ -501,7 +614,6 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                         <span className="text-[8px] tracking-wider uppercase font-bold text-white/50">{k.cardProvider}</span>
                       </div>
                       
-                      {/* Gold chip simulation inside the wallet card */}
                       <div className="w-6 h-4.5 bg-gradient-to-r from-amber-400 to-amber-600 rounded-xs mt-1.5 opacity-80" />
                       
                       <div className="flex justify-between items-end mt-2 z-10">

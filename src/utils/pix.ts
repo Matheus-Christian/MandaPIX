@@ -426,6 +426,11 @@ export interface Store {
   name: string;
   description: string;
   color: string;
+  document?: string;
+  contact?: string;
+  email?: string;
+  legal_name?: string;
+  address?: string;
 }
 
 export interface Client {

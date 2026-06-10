@@ -14,12 +14,12 @@ interface StoreManagerProps {
 }
 
 const GRADIENTS = [
-  { label: 'Azul Real', value: 'from-blue-600 to-indigo-700' },
-  { label: 'Esmeralda', value: 'from-emerald-600 to-teal-700' },
-  { label: 'Laranja Sunset', value: 'from-orange-600 to-amber-700' },
-  { label: 'Rosa Pink', value: 'from-rose-600 to-pink-700' },
-  { label: 'Roxo Místico', value: 'from-purple-600 to-indigo-800' },
-  { label: 'Grafite Escuro', value: 'from-slate-700 to-slate-900' }
+  { label: 'Cinza Mineral', value: 'from-slate-500 to-slate-600' },
+  { label: 'Azul Esmaltado', value: 'from-slate-600 to-blue-700' },
+  { label: 'Verde Sálvia', value: 'from-teal-800 to-slate-600' },
+  { label: 'Terracota Argila', value: 'from-stone-600 to-amber-900' },
+  { label: 'Ametista Muted', value: 'from-indigo-900 to-slate-600' },
+  { label: 'Café Neutro', value: 'from-stone-500 to-stone-700' }
 ];
 
 export const StoreManager: React.FC<StoreManagerProps> = ({
@@ -41,6 +41,11 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
   // Form fields
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [legalName, setLegalName] = useState('');
+  const [document, setDocument] = useState('');
+  const [email, setEmail] = useState('');
+  const [contact, setContact] = useState('');
+  const [address, setAddress] = useState('');
   const [selectedGradient, setSelectedGradient] = useState(GRADIENTS[0].value);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
@@ -48,6 +53,11 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
     setEditingStore(null);
     setName('');
     setDescription('');
+    setLegalName('');
+    setDocument('');
+    setEmail('');
+    setContact('');
+    setAddress('');
     setSelectedGradient(GRADIENTS[0].value);
     setErrors({});
     setIsOpen(true);
@@ -58,6 +68,11 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
     setEditingStore(store);
     setName(store.name);
     setDescription(store.description);
+    setLegalName(store.legal_name || '');
+    setDocument(store.document || '');
+    setEmail(store.email || '');
+    setContact(store.contact || '');
+    setAddress(store.address || '');
     setSelectedGradient(store.color || GRADIENTS[0].value);
     setErrors({});
     setIsOpen(true);
@@ -82,12 +97,22 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
         name: name.trim(),
         description: description.trim(),
         color: selectedGradient,
+        legal_name: legalName.trim(),
+        document: document.trim(),
+        email: email.trim(),
+        contact: contact.trim(),
+        address: address.trim(),
       });
     } else {
       onAddStore({
         name: name.trim(),
         description: description.trim(),
         color: selectedGradient,
+        legal_name: legalName.trim(),
+        document: document.trim(),
+        email: email.trim(),
+        contact: contact.trim(),
+        address: address.trim(),
       });
     }
 
@@ -95,6 +120,11 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
     setEditingStore(null);
     setName('');
     setDescription('');
+    setLegalName('');
+    setDocument('');
+    setEmail('');
+    setContact('');
+    setAddress('');
     setErrors({});
   };
 
@@ -222,6 +252,24 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
                         {store.description || 'Sem descrição cadastrada.'}
                       </p>
 
+                      {/* Store Metadata */}
+                      {(store.document || store.contact || store.email) && (
+                        <div className="pt-2 border-t border-slate-100 space-y-1 text-[10px] text-slate-500">
+                          {store.document && (
+                            <div className="flex items-center gap-1">
+                              <span className="font-extrabold text-[8px] text-slate-400 uppercase tracking-wider">CNPJ/CPF:</span>
+                              <span className="font-semibold truncate text-slate-600">{store.document}</span>
+                            </div>
+                          )}
+                          {store.contact && (
+                            <div className="flex items-center gap-1">
+                              <span className="font-extrabold text-[8px] text-slate-400 uppercase tracking-wider">Contato:</span>
+                              <span className="font-semibold truncate text-slate-600">{store.contact}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Stats Badges */}
                       <div className="flex flex-wrap gap-2 pt-1.5">
                         <span className="text-[10px] font-bold bg-slate-50 border border-slate-100 text-slate-500 px-2.5 py-1 rounded-xl flex items-center gap-1">
@@ -251,7 +299,7 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
       {/* Store Modal */}
       {isOpen && (
         <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden border border-slate-100 shadow-2xl flex flex-col animate-scale-in">
+          <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden border border-slate-100 shadow-2xl flex flex-col animate-scale-in">
             
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -267,21 +315,96 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleStoreSubmit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
-                  Nome da Loja / Negócio
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Minha Consultoria, Loja de Doces"
-                  value={name}
-                  onChange={(e) => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: '' })); }}
-                  className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${
-                    errors.name ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'
-                  }`}
-                />
-                {errors.name && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.name}</p>}
+            <form onSubmit={handleStoreSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Coluna 1 */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      Nome Fantasia (Loja)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Nome da sua Loja ou Negócio"
+                      value={name}
+                      onChange={(e) => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: '' })); }}
+                      className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${
+                        errors.name ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'
+                      }`}
+                    />
+                    {errors.name && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.name}</p>}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      Razão Social (Nome Jurídico)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Razão Social da Empresa Ltda"
+                      value={legalName}
+                      onChange={(e) => setLegalName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      CPF / CNPJ
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 00.000.000/0001-00 ou 000.000.000-00"
+                      value={document}
+                      onChange={(e) => setDocument(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Coluna 2 */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      E-mail de Contato
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="Ex: contato@suaempresa.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      Telefone / WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: (11) 99999-9999"
+                      value={contact}
+                      onChange={(e) => setContact(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      Endereço Comercial
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Rua, Número, Bairro, Cidade - UF"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+
               </div>
 
               <div>
@@ -300,9 +423,9 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
               {/* Gradient Palette Selection */}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                  Paleta de Cores (Identidade Visual)
+                  Paleta de Cores (Identidade Visual - Cores Discretas)
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-6 gap-2">
                   {GRADIENTS.map((g) => (
                     <button
                       key={g.value}
@@ -326,7 +449,7 @@ export const StoreManager: React.FC<StoreManagerProps> = ({
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full bg-pix hover:bg-pix-dark text-white py-2.5 rounded-xl font-bold transition-all shadow-md shadow-pix/10 text-sm"
+                  className="w-full bg-pix hover:bg-pix-dark text-white py-2.5 rounded-xl font-bold transition-all shadow-md shadow-pix/10 text-sm animate-pulse-once"
                 >
                   Salvar Loja
                 </button>

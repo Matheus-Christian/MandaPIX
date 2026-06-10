@@ -72,6 +72,11 @@ CREATE TABLE public.stores (
   name TEXT NOT NULL,
   description TEXT,
   color TEXT NOT NULL, -- Ex: "from-blue-600 to-indigo-600"
+  document TEXT,
+  contact TEXT,
+  email TEXT,
+  legal_name TEXT,
+  address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -490,7 +490,16 @@ function MandaPixApp() {
     try {
       const { error } = await supabase
         .from('stores')
-        .update({ name: updatedStore.name, description: updatedStore.description, color: updatedStore.color })
+        .update({ 
+          name: updatedStore.name, 
+          description: updatedStore.description, 
+          color: updatedStore.color,
+          document: updatedStore.document || null,
+          contact: updatedStore.contact || null,
+          email: updatedStore.email || null,
+          legal_name: updatedStore.legal_name || null,
+          address: updatedStore.address || null
+        })
         .eq('id', updatedStore.id);
       if (error) throw error;
       await loadStores();

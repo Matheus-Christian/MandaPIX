@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Package, Folder, ArrowLeft, Search, Plus, Trash2, Edit, X, FolderOpen, ArrowRight } from 'lucide-react';
+import { Package, Folder, ArrowLeft, Search, Plus, Trash2, Edit, X, FolderOpen, ArrowRight, ShoppingBag } from 'lucide-react';
 import { formatBRL, formatCurrencyInput, parseBRLToNumber } from '../utils/pix';
 import type { Catalog, ProductService } from '../utils/pix';
 
@@ -12,6 +12,7 @@ interface CatalogManagerProps {
   onAddProduct: (product: Omit<ProductService, 'id'>) => void;
   onEditProduct: (product: ProductService) => void;
   onDeleteProduct: (id: string) => void;
+  onSimulateStorefront?: () => void;
 }
 
 export const CatalogManager: React.FC<CatalogManagerProps> = ({
@@ -23,6 +24,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
+  onSimulateStorefront,
 }) => {
   // Navigation level state
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null);
@@ -474,13 +476,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 />
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 flex flex-col gap-2">
                 <button
                   type="submit"
                   className="w-full bg-pix hover:bg-pix-dark text-white py-2.5 rounded-xl font-bold transition-all shadow-md shadow-pix/10 text-sm"
                 >
                   Salvar Catálogo
                 </button>
+                {onSimulateStorefront && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCatalogModalOpen(false);
+                      onSimulateStorefront();
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95"
+                  >
+                    <ShoppingBag className="w-4 h-4" /> Simular Catálogo Online (Cliente)
+                  </button>
+                )}
               </div>
             </form>
           </div>

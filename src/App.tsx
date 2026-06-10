@@ -1746,7 +1746,6 @@ function MandaPixApp() {
                     orders={orders.filter(o => o.storeId === activeStoreId)}
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
-                    onSimulateStorefront={() => setIsStorefrontOpen(true)}
                   />
                 )}
 
@@ -1792,6 +1791,7 @@ function MandaPixApp() {
                     onAddProduct={handleAddProduct}
                     onEditProduct={handleEditProduct}
                     onDeleteProduct={handleDeleteProduct}
+                    onSimulateStorefront={() => setIsStorefrontOpen(true)}
                   />
                 )}
 

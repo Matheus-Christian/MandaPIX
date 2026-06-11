@@ -17,7 +17,8 @@ import {
   ShoppingCart, 
   Wallet as WalletIcon,
   LogOut,
-  CalendarClock
+  CalendarClock,
+  Globe
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -28,9 +29,7 @@ import {
 } from 'react-router-dom';
 
 import { 
-  formatBRL,
-  generatePixPayload,
-  routePixPayment
+  formatBRL
 } from './utils/pix';
 import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar } from './utils/pix';
 
@@ -41,8 +40,9 @@ import { InvoiceManager } from './components/InvoiceManager';
 import { SavedKeys } from './components/SavedKeys';
 import { StoreManager } from './components/StoreManager';
 import { OrderManager } from './components/OrderManager';
-import { StorefrontSimulator } from './components/StorefrontSimulator';
+import { EcommerceManager } from './components/EcommerceManager';
 import { ScheduleManager } from './components/ScheduleManager';
+import { PublicStorefront } from './pages/PublicStorefront';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
@@ -121,12 +121,11 @@ function MandaPixApp() {
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce'>('orders');
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
-  const [isStorefrontOpen, setIsStorefrontOpen] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -290,7 +289,8 @@ function MandaPixApp() {
       name: d.name,
       type: d.type,
       price: Number(d.price),
-      description: d.description
+      description: d.description,
+      image: d.image
     })));
   };
 
@@ -643,7 +643,8 @@ function MandaPixApp() {
           name: newProductData.name,
           type: newProductData.type,
           price: newProductData.price,
-          description: newProductData.description
+          description: newProductData.description,
+          image: newProductData.image
         }]);
       if (error) throw error;
       await loadProducts();
@@ -660,7 +661,8 @@ function MandaPixApp() {
           name: updatedProduct.name,
           type: updatedProduct.type,
           price: updatedProduct.price,
-          description: updatedProduct.description
+          description: updatedProduct.description,
+          image: updatedProduct.image
         })
         .eq('id', updatedProduct.id);
       if (error) throw error;
@@ -901,165 +903,7 @@ function MandaPixApp() {
     }
   };
 
-  const handleCreateOrderFromStorefront = async (orderData: {
-    clientName: string;
-    clientDocument: string;
-    clientEmail: string;
-    clientPhone: string;
-    items: Array<{ productServiceId: string; quantity: number }>;
-    paymentMethod?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
-    scheduledAt?: string;
-    scheduleSlotId?: string;
-  }) => {
-    try {
-      const method = orderData.paymentMethod || 'PIX';
-      const key = (method === 'PIX')
-        ? (savedKeys.find(k => k.walletType === 'PIX_AUTO') || savedKeys.find(k => k.walletType === 'PIX') || savedKeys.find(k => k.isPrimary) || savedKeys[0])
-        : (savedKeys.find(k => k.walletType === method) || savedKeys.find(k => k.isPrimary) || savedKeys[0]);
 
-      if (!key) throw new Error('Nenhuma carteira receptora configurada pelo lojista.');
-
-      const itemsWithDetails = orderData.items.map(item => {
-        const prod = products.find(p => p.id === item.productServiceId);
-        return {
-          productServiceId: item.productServiceId,
-          name: prod?.name || 'Item Desconhecido',
-          quantity: item.quantity,
-          price: prod?.price || 0
-        };
-      });
-
-      const subtotal = itemsWithDetails.reduce((sum, it) => sum + (it.price * it.quantity), 0);
-      let routedGateway = null;
-      let transactionFee = null;
-      let finalTotal = subtotal;
-
-      // Executa o checkout atômico no banco em nome do tenant
-      const { data, error } = await supabase.rpc('create_storefront_order', {
-        p_store_id: activeStoreId,
-        p_client_name: orderData.clientName,
-        p_client_document: orderData.clientDocument,
-        p_client_email: orderData.clientEmail,
-        p_client_phone: orderData.clientPhone,
-        p_items: itemsWithDetails,
-        p_payment_method: method,
-        p_wallet_id: key.id
-      });
-
-      if (error) throw error;
-
-      let pixPayload = data.pixPayload;
-      
-      if (method === 'PIX') {
-        if (key.walletType === 'PIX_AUTO') {
-          const route = routePixPayment(subtotal, routingSettings || {
-            threshold: 100,
-            below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
-            above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
-          });
-          
-          routedGateway = route.gateway;
-          transactionFee = route.fee;
-          finalTotal = route.total;
-
-          pixPayload = generatePixPayload({
-            key: route.key,
-            keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
-            name: `MandaPIX Central (${route.gateway})`,
-            city: 'SAO PAULO',
-            amount: route.total,
-            description: `#${data.orderNumber} Parc 1/1`.substring(0, 72)
-          });
-        } else {
-          pixPayload = generatePixPayload({
-            key: key.key,
-            keyType: key.type,
-            name: key.name,
-            city: key.city,
-            amount: subtotal,
-            description: `#${data.orderNumber} Parc 1/1`.substring(0, 72)
-          });
-        }
-
-        // Buscar parcela única e salvar o payload real gerado
-        const { data: instData } = await supabase
-          .from('installments')
-          .select('id')
-          .eq('invoice_id', data.invoiceId)
-          .single();
-
-        if (instData) {
-          // Atualizar faturas
-          await supabase
-            .from('invoices')
-            .update({
-              routed_gateway: routedGateway,
-              transaction_fee: transactionFee,
-              total_amount: finalTotal
-            })
-            .eq('id', data.invoiceId);
-
-          // Atualizar parcelas
-          await supabase
-            .from('installments')
-            .update({ 
-              pix_payload: pixPayload,
-              routed_gateway: routedGateway,
-              transaction_fee: transactionFee,
-              amount: finalTotal
-            })
-            .eq('id', instData.id);
-
-          // Atualizar pedido total_amount e agendamento
-          const orderUpdate: any = { total_amount: finalTotal };
-          if (orderData.scheduledAt) {
-            orderUpdate.scheduled_at = orderData.scheduledAt;
-            orderUpdate.schedule_slot_id = orderData.scheduleSlotId || null;
-          }
-          await supabase
-            .from('orders')
-            .update(orderUpdate)
-            .eq('invoice_id', data.invoiceId);
-
-          // Increment slot bookings if scheduled
-          if (orderData.scheduleSlotId) {
-            await supabase.rpc('increment_slot_booking', { slot_id: orderData.scheduleSlotId }).catch(() => {
-              // Fallback: manual increment
-              supabase
-                .from('schedule_slots')
-                .select('current_bookings')
-                .eq('id', orderData.scheduleSlotId!)
-                .single()
-                .then((res: any) => {
-                  const sd = res.data;
-                  if (sd) {
-                    supabase
-                      .from('schedule_slots')
-                      .update({ current_bookings: sd.current_bookings + 1 })
-                      .eq('id', orderData.scheduleSlotId!);
-                  }
-                });
-            });
-            await loadScheduleData();
-          }
-        }
-      }
-
-      await loadAllData();
-
-      return {
-        orderNumber: data.orderNumber,
-        pixPayload,
-        invoiceId: data.invoiceId,
-        routedGateway,
-        transactionFee
-      };
-    } catch (err: any) {
-      console.error('Erro ao processar pedido:', err);
-      alert('Erro ao criar pedido: ' + err.message);
-      throw err;
-    }
-  };
 
   const handleKeysChanged = () => {
     loadWallets();
@@ -1783,7 +1627,8 @@ function MandaPixApp() {
                         { id: 'invoices', label: 'Gerenciar vendas', icon: History },
                         { id: 'clients', label: 'Clientes', icon: Users },
                         { id: 'catalogs', label: 'Catálogos', icon: FolderOpen },
-                        { id: 'schedule', label: 'Agendamento', icon: CalendarClock }
+                        { id: 'schedule', label: 'Agendamento', icon: CalendarClock },
+                        { id: 'ecommerce', label: 'E-commerce', icon: Globe }
                       ] as const).map(subTab => {
                         const Icon = subTab.icon;
                         const isSubActive = activeSubTab === subTab.id;
@@ -1858,7 +1703,6 @@ function MandaPixApp() {
                     onAddProduct={handleAddProduct}
                     onEditProduct={handleEditProduct}
                     onDeleteProduct={handleDeleteProduct}
-                    onSimulateStorefront={() => setIsStorefrontOpen(true)}
                   />
                 )}
 
@@ -1877,6 +1721,15 @@ function MandaPixApp() {
                     onToggleSlot={handleToggleScheduleSlot}
                   />
                 )}
+
+                {activeSubTab === 'ecommerce' && (
+                  <EcommerceManager
+                    store={stores.find(s => s.id === activeStoreId)!}
+                    catalogs={catalogs.filter(c => c.storeId === activeStoreId)}
+                    savedKeys={savedKeys}
+                    onSettingsSaved={loadAllData}
+                  />
+                )}
               </div>
             </div>
           )
@@ -1887,29 +1740,7 @@ function MandaPixApp() {
         )}
       </main>
 
-      {/* Simulador de Loja pública do comprador */}
-      {isStorefrontOpen && activeStoreId && (
-        <StorefrontSimulator
-          store={stores.find(s => s.id === activeStoreId)!}
-          catalogs={catalogs.filter(c => c.storeId === activeStoreId)}
-          products={products.filter(p => {
-            const cat = catalogs.find(c => c.id === p.catalogId);
-            return cat && cat.storeId === activeStoreId;
-          })}
-          onPlaceOrder={handleCreateOrderFromStorefront}
-          onClose={() => setIsStorefrontOpen(false)}
-          onSimulatePayment={(invoiceId) => {
-            const invObj = invoices.find(inv => inv.id === invoiceId);
-            if (invObj && invObj.installments.length > 0) {
-              handleUpdateInstallmentStatus(invoiceId, invObj.installments[0].id, 'PAGO');
-            }
-          }}
-          routingSettings={routingSettings}
-          merchantWallets={savedKeys}
-          scheduleCalendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
-          availableSlots={scheduleSlots.filter(s => s.storeId === activeStoreId && s.isEnabled)}
-        />
-      )}
+
 
       {/* MOBILE TAB MENU */}
       <div className="md:hidden bg-white border-t border-slate-100 py-2.5 px-3 flex justify-between select-none flex-shrink-0 z-20 shadow-md">
@@ -1949,6 +1780,8 @@ export default function AppRouter() {
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />
           <Route path="/app" element={<PrivateRoute><MandaPixApp /></PrivateRoute>} />
+          <Route path="/e/:storeId" element={<PublicStorefront />} />
+          <Route path="/e/:storeId/:storeSlug" element={<PublicStorefront />} />
           <Route path="/*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

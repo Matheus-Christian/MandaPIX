@@ -114,6 +114,7 @@ CREATE TABLE public.products (
   type public.product_type NOT NULL,
   price NUMERIC(10, 2) NOT NULL,
   description TEXT,
+  image TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -322,7 +323,14 @@ CREATE OR REPLACE FUNCTION public.create_storefront_order(
   p_client_phone TEXT,
   p_items JSONB,
   p_payment_method TEXT,
-  p_wallet_id UUID
+  p_wallet_id UUID,
+  p_scheduled_at TIMESTAMPTZ,
+  p_schedule_slot_id UUID,
+  p_schedule_calendar_id UUID,
+  p_installments JSONB, -- array of { number, amount, due_date, status, pix_payload, routed_gateway, transaction_fee }
+  p_routed_gateway TEXT,
+  p_transaction_fee NUMERIC,
+  p_total_amount NUMERIC
 ) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
   v_tenant_id UUID;
@@ -330,11 +338,8 @@ DECLARE
   v_invoice_id UUID;
   v_order_id UUID;
   v_invoice_num TEXT;
-  v_total NUMERIC(10, 2) := 0;
-  v_item RECORD;
-  v_pix_payload TEXT := '';
-  v_installment_id UUID;
   v_response JSONB;
+  v_inst RECORD;
 BEGIN
   -- 1. Obter tenant_id da loja
   SELECT tenant_id INTO v_tenant_id FROM public.stores WHERE id = p_store_id;
@@ -342,12 +347,7 @@ BEGIN
     RAISE EXCEPTION 'Loja não encontrada.';
   END IF;
 
-  -- 2. Calcular o valor total a partir dos itens
-  FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(productServiceId UUID, quantity INT, price NUMERIC) LOOP
-    v_total := v_total + (v_item.price * v_item.quantity);
-  END LOOP;
-
-  -- 3. Obter ou Criar o Cliente
+  -- 2. Obter ou Criar o Cliente
   SELECT id INTO v_client_id FROM public.clients 
   WHERE store_id = p_store_id AND document = p_client_document;
 
@@ -357,38 +357,65 @@ BEGIN
     RETURNING id INTO v_client_id;
   END IF;
 
-  -- 4. Gerar número de fatura
+  -- 3. Gerar número de fatura
   SELECT COALESCE(MAX(invoice_number::INT) + 1, 1001)::TEXT INTO v_invoice_num 
   FROM public.invoices WHERE tenant_id = v_tenant_id;
 
-  -- 5. Criar Fatura
-  INSERT INTO public.invoices (tenant_id, store_id, invoice_number, client_id, description, total_amount, installments_count, wallet_id, payment_method_used)
-  VALUES (v_tenant_id, p_store_id, v_invoice_num, v_client_id, 'Pedido #' || v_invoice_num || ' via Catálogo', v_total, 1, p_wallet_id, p_payment_method)
+  -- 4. Criar Fatura
+  INSERT INTO public.invoices (
+    tenant_id, store_id, invoice_number, client_id, description, 
+    total_amount, installments_count, wallet_id, payment_method_used,
+    routed_gateway, transaction_fee
+  )
+  VALUES (
+    v_tenant_id, p_store_id, v_invoice_num, v_client_id, 'Pedido #' || v_invoice_num || ' via E-commerce', 
+    p_total_amount, jsonb_array_length(p_installments), p_wallet_id, p_payment_method,
+    p_routed_gateway, p_transaction_fee
+  )
   RETURNING id INTO v_invoice_id;
 
-  -- 6. Criar Parcela Única
-  -- O payload real será gerado pelo app de qualquer forma, ou simulado aqui
-  v_pix_payload := 'BR.GOV.BCB.PIX...' || v_total::TEXT;
-  
-  INSERT INTO public.installments (tenant_id, invoice_id, number, amount, due_date, status, pix_payload, payment_method_used)
-  VALUES (v_tenant_id, v_invoice_id, 1, v_total, CURRENT_DATE + 5, 'PENDENTE', v_pix_payload, p_payment_method)
-  RETURNING id INTO v_installment_id;
+  -- 5. Criar Parcelas
+  FOR v_inst IN SELECT * FROM jsonb_to_recordset(p_installments) AS x(
+    number INT, amount NUMERIC, due_date DATE, status TEXT, pix_payload TEXT, routed_gateway TEXT, transaction_fee NUMERIC
+  ) LOOP
+    INSERT INTO public.installments (
+      tenant_id, invoice_id, number, amount, due_date, status, pix_payload, payment_method_used, routed_gateway, transaction_fee
+    )
+    VALUES (
+      v_tenant_id, v_invoice_id, v_inst.number, v_inst.amount, v_inst.due_date, v_inst.status::public.installment_status, 
+      v_inst.pix_payload, p_payment_method, v_inst.routed_gateway, v_inst.transaction_fee
+    );
+  END LOOP;
 
-  -- 7. Criar Pedido
-  INSERT INTO public.orders (tenant_id, store_id, order_number, client_name, client_phone, client_email, client_document, items, total_amount, status, invoice_id)
-  VALUES (v_tenant_id, p_store_id, v_invoice_num, p_client_name, p_client_phone, p_client_email, p_client_document, p_items, v_total, 'PENDENTE', v_invoice_id)
+  -- 6. Criar Pedido
+  INSERT INTO public.orders (
+    tenant_id, store_id, order_number, client_name, client_phone, client_email, client_document, 
+    items, total_amount, status, invoice_id, scheduled_at, schedule_slot_id, schedule_calendar_id
+  )
+  VALUES (
+    v_tenant_id, p_store_id, v_invoice_num, p_client_name, p_client_phone, p_client_email, p_client_document, 
+    p_items, p_total_amount, 'PENDENTE', v_invoice_id, p_scheduled_at, p_schedule_slot_id, p_schedule_calendar_id
+  )
   RETURNING id INTO v_order_id;
+
+  -- 7. Incrementar slot se agendado
+  IF p_schedule_slot_id IS NOT NULL THEN
+    UPDATE public.schedule_slots 
+    SET current_bookings = current_bookings + 1 
+    WHERE id = p_schedule_slot_id;
+  END IF;
 
   -- 8. Construir Resposta
   v_response := jsonb_build_object(
     'orderNumber', v_invoice_num,
-    'pixPayload', v_pix_payload,
-    'invoiceId', v_invoice_id
+    'invoiceId', v_invoice_id,
+    'orderId', v_order_id
   );
 
   RETURN v_response;
 END;
 $$ LANGUAGE plpgsql;
+
 
 -- ==========================================
 -- SETTINGS & ROUTING CONFIGURATION
@@ -522,6 +549,41 @@ CREATE POLICY "Leitura pública de slots para clientes"
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS schedule_slot_id UUID REFERENCES public.schedule_slots(id) ON DELETE SET NULL;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS schedule_calendar_id UUID REFERENCES public.schedule_calendars(id) ON DELETE SET NULL;
+
+-- Configurações de E-commerce por Loja
+CREATE TABLE IF NOT EXISTS public.ecommerce_settings (
+  store_id UUID PRIMARY KEY REFERENCES public.stores(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  catalog_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  payment_methods JSONB NOT NULL DEFAULT '["PIX"]'::jsonb,
+  down_payment_enabled BOOLEAN NOT NULL DEFAULT false,
+  down_payment_value NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+  down_payment_type TEXT NOT NULL DEFAULT 'percentage',
+  installments_enabled BOOLEAN NOT NULL DEFAULT false,
+  max_installments INTEGER NOT NULL DEFAULT 1,
+  business_hours JSONB NOT NULL DEFAULT '[]'::jsonb,
+  show_schedule_calendar BOOLEAN NOT NULL DEFAULT true,
+  checkout_fields JSONB NOT NULL DEFAULT '{
+    "name": {"show": true, "required": true},
+    "document": {"show": true, "required": true},
+    "email": {"show": true, "required": true},
+    "phone": {"show": true, "required": true},
+    "address": {"show": false, "required": false}
+  }'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.ecommerce_settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants gerenciam suas configurações de e-commerce"
+  ON public.ecommerce_settings FOR ALL
+  USING (auth.uid() = tenant_id);
+
+CREATE POLICY "Leitura pública de configurações de e-commerce"
+  ON public.ecommerce_settings FOR SELECT
+  USING (true);
 
 
 

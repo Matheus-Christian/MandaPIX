@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Package, Folder, ArrowLeft, Search, Plus, Trash2, Edit, X, FolderOpen, ArrowRight, ShoppingBag } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Package, Folder, ArrowLeft, Search, Plus, Trash2, Edit, X, FolderOpen, ArrowRight } from 'lucide-react';
 import { formatBRL, formatCurrencyInput, parseBRLToNumber } from '../utils/pix';
 import type { Catalog, ProductService } from '../utils/pix';
 
@@ -12,7 +12,6 @@ interface CatalogManagerProps {
   onAddProduct: (product: Omit<ProductService, 'id'>) => void;
   onEditProduct: (product: ProductService) => void;
   onDeleteProduct: (id: string) => void;
-  onSimulateStorefront?: () => void;
 }
 
 export const CatalogManager: React.FC<CatalogManagerProps> = ({
@@ -24,7 +23,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
-  onSimulateStorefront,
 }) => {
   // Navigation level state
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null);
@@ -48,6 +46,98 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productPriceRaw, setProductPriceRaw] = useState('');
   const [productDescription, setProductDescription] = useState('');
   const [productErrors, setProductErrors] = useState<{ [key: string]: string }>({});
+  const [productImage, setProductImage] = useState<string | undefined>(undefined);
+
+  // Cropper states
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const cropperImageRef = useRef<HTMLImageElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setOffset({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    setIsDragging(true);
+    setDragStart({
+      x: e.touches[0].clientX - offset.x,
+      y: e.touches[0].clientY - offset.y
+    });
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging || e.touches.length !== 1) return;
+    setOffset({
+      x: e.touches[0].clientX - dragStart.x,
+      y: e.touches[0].clientY - dragStart.y
+    });
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
+
+  const handleImageUploadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setCropperSrc(event.target.result as string);
+          setZoom(1);
+          setOffset({ x: 0, y: 0 });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleCropConfirm = () => {
+    if (!cropperSrc || !cropperImageRef.current) return;
+    const img = cropperImageRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 400, 400);
+
+      const screenHeight = 256;
+      const screenWidth = 256 * (img.naturalWidth / img.naturalHeight);
+      const scaleFactor = 400 / 208; // 208px is the cutout view inside the 256x256 container minus 24px borders
+      
+      const cW = screenWidth * zoom * scaleFactor;
+      const cH = screenHeight * zoom * scaleFactor;
+      const cX = 200 + offset.x * scaleFactor;
+      const cY = 200 + offset.y * scaleFactor;
+      
+      ctx.drawImage(img, cX - cW / 2, cY - cH / 2, cW, cH);
+      
+      const croppedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+      setProductImage(croppedBase64);
+      setCropperSrc(null);
+    }
+  };
 
   // Get current catalog object
   const activeCatalog = catalogs.find(c => c.id === selectedCatalogId);
@@ -122,6 +212,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductType('SERVICO');
     setProductPriceRaw('');
     setProductDescription('');
+    setProductImage(undefined);
     setProductErrors({});
     setIsProductModalOpen(true);
   };
@@ -132,6 +223,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductType(prod.type);
     setProductPriceRaw(prod.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 }));
     setProductDescription(prod.description);
+    setProductImage(prod.image);
     setProductErrors({});
     setIsProductModalOpen(true);
   };
@@ -165,6 +257,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         type: productType,
         price,
         description: productDescription.trim(),
+        image: productImage,
       });
     } else {
       onAddProduct({
@@ -173,6 +266,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         type: productType,
         price,
         description: productDescription.trim(),
+        image: productImage,
       });
     }
 
@@ -391,6 +485,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     className="bg-white p-5 rounded-2xl border border-slate-100 hover:border-slate-200 shadow-sm flex flex-col justify-between transition-all group"
                   >
                     <div className="space-y-2.5">
+                      {product.image && (
+                        <div className="w-full h-32 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 mb-1">
+                          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                        </div>
+                      )}
                       <div className="flex justify-between items-center">
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border ${
                           product.type === 'SERVICO'
@@ -483,18 +582,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 >
                   Salvar Catálogo
                 </button>
-                {onSimulateStorefront && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCatalogModalOpen(false);
-                      onSimulateStorefront();
-                    }}
-                    className="w-full flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95"
-                  >
-                    <ShoppingBag className="w-4 h-4" /> Simular Catálogo Online (Cliente)
-                  </button>
-                )}
               </div>
             </form>
           </div>
@@ -560,6 +647,48 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Foto do Item (Opcional)</label>
+                <div className="flex items-center gap-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                  {productImage ? (
+                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm flex-shrink-0">
+                      <img src={productImage} alt="Preview" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setProductImage(undefined)}
+                        className="absolute inset-0 bg-black/40 text-white flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                        title="Remover Foto"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl border border-dashed border-slate-350 flex items-center justify-center text-slate-400 bg-white flex-shrink-0">
+                      <Plus className="w-5 h-5 text-slate-300" />
+                    </div>
+                  )}
+
+                  <div className="flex-1 space-y-1">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUploadChange}
+                      className="hidden"
+                      id="product-image-upload"
+                    />
+                    <label
+                      htmlFor="product-image-upload"
+                      className="inline-block bg-slate-900 hover:bg-slate-800 text-white text-[10px] uppercase tracking-wide font-bold py-1.5 px-3 rounded-lg cursor-pointer transition-all active:scale-95 shadow-sm"
+                    >
+                      Selecionar Foto
+                    </label>
+                    <p className="text-[9px] text-slate-400 leading-normal font-semibold">
+                      Enquadramento recomendado: quadrado (1:1, ex: 400x400px).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Descrição Breve (Opcional)</label>
                 <textarea
                   placeholder="Escreva detalhes técnicos ou características do produto/serviço..."
@@ -579,6 +708,101 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- MODAL: CUSTOM IMAGE CROPPER ----------------- */}
+      {cropperSrc && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden border border-slate-150 shadow-2xl flex flex-col p-5 space-y-4 animate-scale-in">
+            
+            <div className="flex items-center justify-between">
+              <h4 className="font-extrabold text-slate-800 text-sm">Enquadrar Imagem</h4>
+              <button
+                type="button"
+                onClick={() => setCropperSrc(null)}
+                className="text-slate-400 hover:text-slate-650 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
+              Arraste a imagem para reposicionar e use a barra abaixo para ajustar o zoom. A área central clara representa o enquadramento final quadrado (1:1, corte final de 400x400px).
+            </p>
+
+            {/* Cropping box frame */}
+            <div 
+              className="w-64 h-64 relative overflow-hidden bg-slate-900 border border-slate-200 rounded-2xl mx-auto cursor-move select-none"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <img
+                src={cropperSrc}
+                alt="Upload a recortar"
+                draggable="false"
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${zoom})`,
+                  transformOrigin: 'center',
+                  maxHeight: 'none',
+                  maxWidth: 'none',
+                  width: 'auto',
+                  height: '100%',
+                  pointerEvents: 'none'
+                }}
+                ref={cropperImageRef}
+              />
+              
+              {/* Overlay borders forming a square cutout */}
+              <div className="absolute inset-0 border-[24px] border-slate-950/60 pointer-events-none">
+                <div className="w-full h-full border border-white/40" />
+              </div>
+            </div>
+
+            {/* Slider zoom */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[9px] font-bold text-slate-450 uppercase tracking-wider">
+                <span>Ampliar Imagem</span>
+                <span>{zoom.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.05"
+                value={zoom}
+                onChange={(e) => setZoom(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-pix focus:outline-none"
+              />
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2.5 pt-1.5">
+              <button
+                type="button"
+                onClick={() => setCropperSrc(null)}
+                className="flex-1 bg-slate-50 hover:bg-slate-150 text-slate-700 py-2 rounded-xl text-xs font-bold transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCropConfirm}
+                className="flex-1 bg-pix hover:bg-pix-dark text-white py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-pix/10"
+              >
+                Cortar e Salvar
+              </button>
+            </div>
+
           </div>
         </div>
       )}

@@ -456,6 +456,7 @@ export interface ProductService {
   type: 'PRODUTO' | 'SERVICO';
   price: number;
   description: string;
+  image?: string;
 }
 
 export interface Installment {
@@ -784,4 +785,76 @@ export const DEFAULT_ORDERS: Order[] = [
     invoiceId: 'inv-3'
   }
 ];
+
+// ==========================================
+// E-COMMERCE CONFIGURATION TYPES
+// ==========================================
+
+export interface CheckoutFieldConfig {
+  show: boolean;
+  required: boolean;
+}
+
+export interface CheckoutFields {
+  name: CheckoutFieldConfig;
+  document: CheckoutFieldConfig;
+  email: CheckoutFieldConfig;
+  phone: CheckoutFieldConfig;
+  address: CheckoutFieldConfig;
+}
+
+export interface BusinessHourDay {
+  day: number; // 0 = Sunday, 1 = Monday, etc.
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+export interface EcommerceSettings {
+  store_id: string;
+  is_enabled: boolean;
+  catalog_ids: string[];
+  payment_methods: Array<'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'>;
+  down_payment_enabled: boolean;
+  down_payment_value: number;
+  down_payment_type: 'percentage' | 'fixed';
+  installments_enabled: boolean;
+  max_installments: number;
+  business_hours: BusinessHourDay[];
+  show_schedule_calendar: boolean;
+  checkout_fields: CheckoutFields;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const DEFAULT_BUSINESS_HOURS: BusinessHourDay[] = [
+  { day: 1, open: '08:00', close: '18:00', closed: false },
+  { day: 2, open: '08:00', close: '18:00', closed: false },
+  { day: 3, open: '08:00', close: '18:00', closed: false },
+  { day: 4, open: '08:00', close: '18:00', closed: false },
+  { day: 5, open: '08:00', close: '18:00', closed: false },
+  { day: 6, open: '09:00', close: '13:00', closed: true },
+  { day: 0, open: '09:00', close: '13:00', closed: true }
+];
+
+export const DEFAULT_CHECKOUT_FIELDS: CheckoutFields = {
+  name: { show: true, required: true },
+  document: { show: true, required: true },
+  email: { show: true, required: true },
+  phone: { show: true, required: true },
+  address: { show: false, required: false }
+};
+
+export const slugify = (text: string): string => {
+  return text
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-') // replace spaces with -
+    .replace(/[^\w-]+/g, '') // remove all non-word chars
+    .replace(/--+/g, '-'); // replace multiple - with single -
+};
+
 

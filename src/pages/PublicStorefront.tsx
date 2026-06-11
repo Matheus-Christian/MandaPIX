@@ -97,6 +97,8 @@ export const PublicStorefront: React.FC = () => {
     orderNumber: string;
     invoiceId: string;
     orderId: string;
+    totalAmount: number;
+    downPaymentAmount: number;
     installments: Array<{
       id: string;
       number: number;
@@ -275,15 +277,36 @@ export const PublicStorefront: React.FC = () => {
       };
     }
 
+    if (config.is24h) {
+      return { isOpen: true, message: '' };
+    }
+
     // Current HH:MM format
     const pad = (n: number) => n.toString().padStart(2, '0');
     const currentTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-    if (currentTime < config.open || currentTime > config.close) {
-      return { 
-        isOpen: false, 
-        message: `A loja está fechada no momento. Nosso expediente de hoje é das ${config.open} às ${config.close}.` 
-      };
+    if (config.hasInterval) {
+      const open1 = config.open || '08:00';
+      const close1 = config.close || '12:00';
+      const open2 = config.open2 || '14:00';
+      const close2 = config.close2 || '18:00';
+
+      const inPeriod1 = currentTime >= open1 && currentTime <= close1;
+      const inPeriod2 = currentTime >= open2 && currentTime <= close2;
+
+      if (!inPeriod1 && !inPeriod2) {
+        return {
+          isOpen: false,
+          message: `A loja está fechada no momento. Expediente de hoje: das ${open1} às ${close1} e das ${open2} às ${close2}.`
+        };
+      }
+    } else {
+      if (currentTime < config.open || currentTime > config.close) {
+        return { 
+          isOpen: false, 
+          message: `A loja está fechada no momento. Nosso expediente de hoje é das ${config.open} às ${config.close}.` 
+        };
+      }
     }
 
     return { isOpen: true, message: '' };
@@ -424,6 +447,14 @@ export const PublicStorefront: React.FC = () => {
   // Active wallets & routing
   const activeWallet = useMemo(() => {
     if (merchantWallets.length === 0) return null;
+
+    // Check if the tenant selected a specific wallet for this payment method
+    const selectedWalletId = ecommerceSettings?.payment_wallets?.[paymentMethod];
+    if (selectedWalletId) {
+      const selected = merchantWallets.find(k => k.id === selectedWalletId);
+      if (selected) return selected;
+    }
+
     if (paymentMethod === 'PIX') {
       return (
         merchantWallets.find(k => k.walletType === 'PIX_AUTO') ||
@@ -438,7 +469,7 @@ export const PublicStorefront: React.FC = () => {
         merchantWallets[0]
       );
     }
-  }, [merchantWallets, paymentMethod]);
+  }, [merchantWallets, paymentMethod, ecommerceSettings]);
 
   const isPixAuto = activeWallet?.walletType === 'PIX_AUTO';
 
@@ -581,14 +612,20 @@ export const PublicStorefront: React.FC = () => {
               description: `Saldo Pedido`.substring(0, 72)
             });
 
-            // Spaced 30 days
-            const futureDate = new Date();
-            futureDate.setDate(futureDate.getDate() + 30);
+            // Spaced 30 days or scheduled slot date
+            let dueDateStr = '';
+            if (selectedSlotId && selectedSlot) {
+              dueDateStr = selectedSlot.slotDate;
+            } else {
+              const futureDate = new Date();
+              futureDate.setDate(futureDate.getDate() + 30);
+              dueDateStr = futureDate.toISOString().split('T')[0];
+            }
 
             installmentsList.push({
               number: 2,
               amount: inst2Amount,
-              due_date: futureDate.toISOString().split('T')[0],
+              due_date: dueDateStr,
               status: 'PENDENTE',
               pix_payload: pix2,
               routed_gateway: inst2Gateway,
@@ -732,9 +769,13 @@ export const PublicStorefront: React.FC = () => {
         orderNumber: data.orderNumber,
         invoiceId: data.invoiceId,
         orderId: data.orderId,
+        totalAmount: totalAmountToRecord,
+        downPaymentAmount: downPaymentAmount,
         installments: installmentsList.map((inst, index) => ({
           ...inst,
-          id: `temp-${index}`
+          id: `temp-${index}`,
+          dueDate: inst.due_date,
+          pixPayload: inst.pix_payload
         }))
       });
 
@@ -822,17 +863,23 @@ export const PublicStorefront: React.FC = () => {
       // Fetch actual installments from database
       const { data: dbInsts } = await supabase
         .from('installments')
-        .select('id')
+        .select('id, number')
         .eq('invoice_id', checkoutResult.invoiceId);
 
       if (dbInsts) {
-        // Update all to paid
-        await Promise.all(dbInsts.map((inst: any) => 
-          supabase
+        // If there's a down payment, we only simulate payment of the entry (installment number 1)
+        const hasDownPayment = checkoutResult.downPaymentAmount > 0;
+
+        await Promise.all(dbInsts.map((inst: any) => {
+          if (hasDownPayment && inst.number !== 1) {
+            // Leave other installments PENDING
+            return Promise.resolve();
+          }
+          return supabase
             .from('installments')
             .update({ status: 'PAGO', confirmed_date: new Date().toISOString().split('T')[0] })
-            .eq('id', inst.id)
-        ));
+            .eq('id', inst.id);
+        }));
 
         // Update order
         await supabase
@@ -840,6 +887,20 @@ export const PublicStorefront: React.FC = () => {
           .update({ status: 'APROVADO' })
           .eq('invoice_id', checkoutResult.invoiceId);
       }
+
+      setCheckoutResult(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          installments: prev.installments.map(inst => {
+            const isEntry = inst.number === 1 && prev.downPaymentAmount > 0;
+            if (isEntry || prev.downPaymentAmount === 0) {
+              return { ...inst, status: 'PAGO' };
+            }
+            return inst;
+          })
+        };
+      });
 
       setIsPaymentSimulated(true);
       triggerSuccessSoundAndConfetti();
@@ -937,7 +998,7 @@ export const PublicStorefront: React.FC = () => {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-xs font-bold text-slate-400 px-1">
                     <span>
-                      {downPaymentAmount > 0 ? 'Entrada Obrigatória (PIX)' : 'Valor da Parcela 1 (PIX)'}
+                      {checkoutResult.downPaymentAmount > 0 ? 'Entrada Obrigatória (PIX)' : 'Valor da Parcela 1 (PIX)'}
                     </span>
                     <span className="text-white font-extrabold text-sm">
                       {formatBRL(checkoutResult.installments[0].amount)}
@@ -962,6 +1023,38 @@ export const PublicStorefront: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* DETAILED PAYMENT BREAKDOWN FOR PIX */}
+                {checkoutResult && checkoutResult.installments.length > 0 && (
+                  <div className="border-t border-slate-800 pt-3 text-left space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fluxo de Cobrança do Pedido</p>
+                    <div className="space-y-1.5">
+                      {checkoutResult.installments.map((inst, index) => {
+                        const isEntry = inst.number === 1 && checkoutResult.installments.length === 2 && checkoutResult.downPaymentAmount > 0;
+                        const label = isEntry ? "Entrada (Adiantado)" : (checkoutResult.installments.length === 2 && checkoutResult.downPaymentAmount > 0 ? "Saldo Restante" : `Parcela ${inst.number}`);
+                        const statusLabel = index === 0 ? "AGUARDANDO PIX" : "AGUARDANDO DATA";
+                        return (
+                          <div key={index} className="flex justify-between items-center text-[10px] bg-slate-900/40 p-2.5 rounded-xl border border-slate-850/50">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-white">{label}</span>
+                              <span className="text-[9px] text-slate-500">
+                                {isEntry ? "Pagar agora para confirmar agendamento" : `Vence no dia ${new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-white">{formatBRL(inst.amount)}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                                index === 0 ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse" : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {statusLabel}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <button
                   onClick={simulateSuccess}
@@ -1000,10 +1093,42 @@ export const PublicStorefront: React.FC = () => {
                     )}
                     <div className="flex justify-between pt-2 border-t border-slate-800 text-xs font-bold">
                       <span className="text-slate-400">Total do Pedido</span>
-                      <span className="text-white">{formatBRL(cartTotal)}</span>
+                      <span className="text-white">{formatBRL(checkoutResult.totalAmount)}</span>
                     </div>
                   </div>
                 </div>
+
+                {/* DETAILED PAYMENT BREAKDOWN */}
+                {checkoutResult && checkoutResult.installments.length > 0 && (
+                  <div className="border-t border-slate-800 pt-3 text-left space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Detalhamento do Pagamento</p>
+                    <div className="space-y-1.5">
+                      {checkoutResult.installments.map((inst, index) => {
+                        const isEntry = inst.number === 1 && checkoutResult.installments.length === 2 && checkoutResult.downPaymentAmount > 0;
+                        const label = isEntry ? "Entrada (Adiantado)" : (checkoutResult.installments.length === 2 && checkoutResult.downPaymentAmount > 0 ? "Saldo Restante" : `Parcela ${inst.number}`);
+                        const isPaid = paymentMethod !== 'PIX' || inst.status === 'PAGO';
+                        return (
+                          <div key={index} className="flex justify-between items-center text-[10px] bg-slate-900/40 p-2.5 rounded-xl border border-slate-850/50">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-white">{label}</span>
+                              <span className="text-[9px] text-slate-500">
+                                {isEntry ? "Pago via Pix" : `Vence no dia ${new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-white">{formatBRL(inst.amount)}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                                isPaid ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                              }`}>
+                                {isPaid ? "PAGO" : "PENDENTE"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <p className="text-[10px] text-slate-500 italic">
                   Seu agendamento e fatura já foram integrados ao painel do lojista.
@@ -1619,15 +1744,21 @@ export const PublicStorefront: React.FC = () => {
                     <div className="pt-4 border-t border-slate-100 space-y-3">
                       {/* Down payment display */}
                       {downPaymentAmount > 0 && (
-                        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-[10px] font-semibold text-amber-700 space-y-1">
-                          <div className="flex justify-between">
+                        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-[11px] font-semibold text-amber-700 space-y-2">
+                          <div className="flex justify-between items-center pb-1.5 border-b border-amber-200/50">
                             <span>Sua Entrada Requerida Hoje:</span>
-                            <span className="font-extrabold">{formatBRL(downPaymentAmount)}</span>
+                            <span className="font-extrabold text-xs">{formatBRL(downPaymentAmount)}</span>
                           </div>
                           {remainingBalance > 0 && (
-                            <div className="flex justify-between text-[9px] text-amber-600 font-medium">
-                              <span>Saldo Restante (a pagar depois):</span>
-                              <span>{formatBRL(remainingBalance)}</span>
+                            <div className="flex justify-between items-center text-[10px] text-amber-600 font-medium">
+                              <span>
+                                {selectedSlot ? (
+                                  <>Saldo Restante (a pagar no dia {new Date(selectedSlot.slotDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}):</>
+                                ) : (
+                                  <>Saldo Restante (a pagar depois):</>
+                                )}
+                              </span>
+                              <span className="font-bold">{formatBRL(remainingBalance)}</span>
                             </div>
                           )}
                         </div>

@@ -347,9 +347,14 @@ BEGIN
     RAISE EXCEPTION 'Loja não encontrada.';
   END IF;
 
-  -- 2. Obter ou Criar o Cliente
+  -- 2. Obter ou Criar o Cliente (evita misturar clientes com documentos vazios ou mockados se o nome for diferente)
   SELECT id INTO v_client_id FROM public.clients 
-  WHERE store_id = p_store_id AND document = p_client_document;
+  WHERE store_id = p_store_id 
+    AND document = p_client_document
+    AND (
+      (p_client_document <> 'NÃO INFORMADO' AND p_client_document <> '000.000.000-00' AND p_client_document <> '111.111.111-11')
+      OR LOWER(name) = LOWER(p_client_name)
+    );
 
   IF v_client_id IS NULL THEN
     INSERT INTO public.clients (tenant_id, store_id, name, document, email, phone)
@@ -557,6 +562,7 @@ CREATE TABLE IF NOT EXISTS public.ecommerce_settings (
   is_enabled BOOLEAN NOT NULL DEFAULT true,
   catalog_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   payment_methods JSONB NOT NULL DEFAULT '["PIX"]'::jsonb,
+  payment_wallets JSONB NOT NULL DEFAULT '{}'::jsonb,
   down_payment_enabled BOOLEAN NOT NULL DEFAULT false,
   down_payment_value NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
   down_payment_type TEXT NOT NULL DEFAULT 'percentage',

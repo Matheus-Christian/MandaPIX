@@ -808,6 +808,10 @@ export interface BusinessHourDay {
   open: string;
   close: string;
   closed: boolean;
+  is24h?: boolean;
+  hasInterval?: boolean;
+  open2?: string;
+  close2?: string;
 }
 
 export interface EcommerceSettings {
@@ -815,6 +819,7 @@ export interface EcommerceSettings {
   is_enabled: boolean;
   catalog_ids: string[];
   payment_methods: Array<'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'>;
+  payment_wallets?: Record<string, string>;
   down_payment_enabled: boolean;
   down_payment_value: number;
   down_payment_type: 'percentage' | 'fixed';

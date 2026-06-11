@@ -1,18 +1,27 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays } from 'lucide-react';
 import { formatBRL } from '../utils/pix';
-import type { Order } from '../utils/pix';
+import type { Order, Invoice } from '../utils/pix';
 
 interface OrderManagerProps {
   orders: Order[];
+  invoices?: Invoice[];
   onCancelOrder: (id: string) => void;
   onUpdateOrderStatus: (id: string, status: Order['status']) => void;
+  onUpdateInstallmentStatus?: (
+    invoiceId: string,
+    installmentId: string,
+    status: 'PAGO' | 'PENDENTE',
+    paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'
+  ) => void;
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
   orders,
+  invoices,
   onCancelOrder,
-  onUpdateOrderStatus
+  onUpdateOrderStatus,
+  onUpdateInstallmentStatus
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO'>('ALL');
@@ -39,6 +48,12 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
   // Details Modal State
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Find linked invoice for the selected order
+  const linkedInvoice = useMemo(() => {
+    if (!selectedOrder?.invoiceId || !invoices) return null;
+    return invoices.find(inv => inv.id === selectedOrder.invoiceId);
+  }, [selectedOrder, invoices]);
 
   // Agenda/Calendar Calculations
   const todayDate = useMemo(() => {
@@ -864,16 +879,72 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                 </div>
               </div>
 
-              {/* Linked Invoice Info */}
-              {selectedOrder.invoiceId && (
-                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-400 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4" /> Cobrança Vinculada
-                  </span>
-                  <span className="text-slate-800 bg-white border border-slate-100 px-2.5 py-1 rounded-xl shadow-xs">
-                    PIX Copia e Cola / QR Code ativo
-                  </span>
+              {/* Linked Invoice / Financial Details Breakdown */}
+              {linkedInvoice && linkedInvoice.installments && linkedInvoice.installments.length > 0 ? (
+                <div className="space-y-2.5">
+                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Detalhamento Financeiro (Entrada/Parcelas)</h4>
+                  <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3 shadow-inner">
+                    <div className="divide-y divide-slate-200/60 space-y-3">
+                      {linkedInvoice.installments.map((inst) => {
+                        const isEntry = inst.number === 1 && linkedInvoice.installments.length === 2 && inst.amount < linkedInvoice.totalAmount;
+                        const label = isEntry ? "Entrada (Adiantado)" : (linkedInvoice.installments.length === 2 && inst.amount < linkedInvoice.totalAmount ? "Saldo Restante" : `Parcela ${inst.number}`);
+                        
+                        return (
+                          <div key={inst.id} className="flex flex-col sm:flex-row sm:items-center justify-between pt-3 first:pt-0 gap-2 text-xs">
+                            <div className="space-y-0.5">
+                              <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                                <span className={`w-1.5 h-1.5 rounded-full ${inst.status === 'PAGO' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+                                {label}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-semibold">
+                                Vencimento: {new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                {inst.confirmedDate && ` • Pago em: ${new Date(inst.confirmedDate + 'T12:00:00').toLocaleDateString('pt-BR')}`}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-3 justify-between sm:justify-end">
+                              <span className="font-extrabold text-slate-800">{formatBRL(inst.amount)}</span>
+                              
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold uppercase ${
+                                  inst.status === 'PAGO'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                    : 'bg-amber-50 text-amber-700 border-amber-100'
+                                }`}>
+                                  {inst.status === 'PAGO' ? 'Pago' : 'Pendente'}
+                                </span>
+
+                                {inst.status === 'PENDENTE' && onUpdateInstallmentStatus && (
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm(`Confirmar recebimento manual de ${formatBRL(inst.amount)} para este pedido?`)) {
+                                        onUpdateInstallmentStatus(linkedInvoice.id, inst.id, 'PAGO', 'PIX');
+                                      }
+                                    }}
+                                    className="bg-white hover:bg-slate-105 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 shadow-xs"
+                                  >
+                                    Confirmar Pago
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
+              ) : (
+                selectedOrder.invoiceId && (
+                  <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <FileText className="w-4 h-4" /> Cobrança Vinculada
+                    </span>
+                    <span className="text-slate-800 bg-white border border-slate-100 px-2.5 py-1 rounded-xl shadow-xs">
+                      PIX Copia e Cola / QR Code ativo
+                    </span>
+                  </div>
+                )
               )}
             </div>
           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard } from 'lucide-react';
 import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload, routePixPayment } from '../utils/pix';
-import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog } from '../utils/pix';
+import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog, EcommerceSettings } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
 interface InvoiceManagerProps {
@@ -17,6 +17,7 @@ interface InvoiceManagerProps {
   onNavigateToKeys: () => void;
   onNavigateToClients: () => void;
   routingSettings?: any;
+  ecommerceSettings?: EcommerceSettings | null;
 }
 
 export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
@@ -32,6 +33,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   onNavigateToKeys,
   onNavigateToClients,
   routingSettings,
+  ecommerceSettings,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PAGO' | 'A_VENCER' | 'VENCIDO'>('TODOS');
@@ -226,13 +228,36 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   });
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
-  // Populate primary key
+  // Populate primary key / settings key
   useEffect(() => {
     if (savedKeys.length > 0) {
-      const primary = savedKeys.find(k => k.isPrimary) || savedKeys[0];
-      setPixKeyId(primary.id);
+      const defaultPixKeyId = ecommerceSettings?.payment_wallets?.['PIX'];
+      const keyToUse = savedKeys.find(k => k.id === defaultPixKeyId) || savedKeys.find(k => k.isPrimary) || savedKeys[0];
+      if (keyToUse) {
+        setPixKeyId(keyToUse.id);
+      }
     }
-  }, [savedKeys]);
+  }, [savedKeys, ecommerceSettings]);
+
+  // Automatically calculate default entry amount when total amount or settings change
+  useEffect(() => {
+    if (ecommerceSettings?.down_payment_enabled) {
+      const totalVal = parseBRLToNumber(amountRaw);
+      if (totalVal > 0) {
+        let defaultEntry = 0;
+        if (ecommerceSettings.down_payment_type === 'percentage') {
+          defaultEntry = Math.min(totalVal, (totalVal * ecommerceSettings.down_payment_value) / 100);
+        } else {
+          defaultEntry = Math.min(totalVal, ecommerceSettings.down_payment_value);
+        }
+        setEntryAmountRaw(defaultEntry.toLocaleString('pt-BR', { minimumFractionDigits: 2 }));
+      } else {
+        setEntryAmountRaw('');
+      }
+    } else {
+      setEntryAmountRaw('');
+    }
+  }, [amountRaw, ecommerceSettings]);
 
   // Handle product selection to autofill amount and description
   const handleProductSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -822,7 +847,10 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white font-semibold"
                     >
                       <option value={1}>À vista (1x)</option>
-                      {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => {
+                      {Array.from(
+                        { length: (ecommerceSettings?.installments_enabled ? ecommerceSettings.max_installments : 12) - 1 },
+                        (_, i) => i + 2
+                      ).map(n => {
                         const totalVal = parseBRLToNumber(amountRaw);
                         const entryVal = entryAmountRaw ? parseBRLToNumber(entryAmountRaw) : 0;
                         const remainingVal = totalVal - entryVal;

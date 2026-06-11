@@ -31,7 +31,7 @@ import {
 import { 
   formatBRL
 } from './utils/pix';
-import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar } from './utils/pix';
+import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar, EcommerceSettings } from './utils/pix';
 
 import { VirtualCard } from './components/VirtualCard';
 import { ClientManager } from './components/ClientManager';
@@ -42,6 +42,7 @@ import { StoreManager } from './components/StoreManager';
 import { OrderManager } from './components/OrderManager';
 import { EcommerceManager } from './components/EcommerceManager';
 import { ScheduleManager } from './components/ScheduleManager';
+import { BillingSettingsManager } from './components/BillingSettingsManager';
 import { PublicStorefront } from './pages/PublicStorefront';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -121,7 +122,7 @@ function MandaPixApp() {
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce' | 'cobranças'>('orders');
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
@@ -134,6 +135,30 @@ function MandaPixApp() {
   const [savedKeys, setSavedKeys] = useState<SavedPixKey[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [routingSettings, setRoutingSettings] = useState<any>(null);
+  const [ecommerceSettings, setEcommerceSettings] = useState<EcommerceSettings | null>(null);
+
+  const loadEcommerceSettings = async (storeId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('ecommerce_settings')
+        .select('*')
+        .eq('store_id', storeId)
+        .maybeSingle();
+
+      if (error) throw error;
+      setEcommerceSettings(data as EcommerceSettings || null);
+    } catch (err) {
+      console.error('Erro ao carregar configurações de cobrança:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeStoreId) {
+      loadEcommerceSettings(activeStoreId);
+    } else {
+      setEcommerceSettings(null);
+    }
+  }, [activeStoreId]);
 
   // Estados de Carregamento
   const [loadingData, setLoadingData] = useState(true);
@@ -1628,7 +1653,8 @@ function MandaPixApp() {
                         { id: 'clients', label: 'Clientes', icon: Users },
                         { id: 'catalogs', label: 'Catálogos', icon: FolderOpen },
                         { id: 'schedule', label: 'Agendamento', icon: CalendarClock },
-                        { id: 'ecommerce', label: 'E-commerce', icon: Globe }
+                        { id: 'ecommerce', label: 'E-commerce', icon: Globe },
+                        { id: 'cobranças', label: 'Cobranças', icon: DollarSign }
                       ] as const).map(subTab => {
                         const Icon = subTab.icon;
                         const isSubActive = activeSubTab === subTab.id;
@@ -1656,6 +1682,7 @@ function MandaPixApp() {
                 {activeSubTab === 'orders' && (
                   <OrderManager
                     orders={orders.filter(o => o.storeId === activeStoreId)}
+                    invoices={invoices.filter(inv => inv.storeId === activeStoreId)}
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                   />
@@ -1678,6 +1705,7 @@ function MandaPixApp() {
                     onNavigateToKeys={() => setActiveTab('wallets')}
                     onNavigateToClients={() => setActiveSubTab('clients')}
                     routingSettings={routingSettings}
+                    ecommerceSettings={ecommerceSettings}
                   />
                 )}
 
@@ -1726,8 +1754,18 @@ function MandaPixApp() {
                   <EcommerceManager
                     store={stores.find(s => s.id === activeStoreId)!}
                     catalogs={catalogs.filter(c => c.storeId === activeStoreId)}
-                    savedKeys={savedKeys}
                     onSettingsSaved={loadAllData}
+                  />
+                )}
+
+                {activeSubTab === 'cobranças' && (
+                  <BillingSettingsManager
+                    store={stores.find(s => s.id === activeStoreId)!}
+                    savedKeys={savedKeys}
+                    onSettingsSaved={() => {
+                      loadAllData();
+                      if (activeStoreId) loadEcommerceSettings(activeStoreId);
+                    }}
                   />
                 )}
               </div>
@@ -1781,7 +1819,7 @@ export default function AppRouter() {
           <Route path="/admin" element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />
           <Route path="/app" element={<PrivateRoute><MandaPixApp /></PrivateRoute>} />
           <Route path="/e/:storeId" element={<PublicStorefront />} />
-          <Route path="/e/:storeId/:storeSlug" element={<PublicStorefront />} />
+          <Route path="/e/:storeSlug/:storeId" element={<PublicStorefront />} />
           <Route path="/*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

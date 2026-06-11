@@ -6,19 +6,16 @@ import {
   Calendar, 
   User, 
   Globe, 
-  Save, 
-  AlertTriangle 
+  Save 
 } from 'lucide-react';
 import { supabase } from '../utils/supabaseClient';
 import { 
-  formatCurrencyInput, 
   parseBRLToNumber,
   slugify
 } from '../utils/pix';
 import type { 
   Store, 
   Catalog, 
-  SavedPixKey, 
   EcommerceSettings, 
   BusinessHourDay, 
   CheckoutFields 
@@ -38,14 +35,12 @@ const WEEKDAYS = [
 interface EcommerceManagerProps {
   store: Store;
   catalogs: Catalog[];
-  savedKeys: SavedPixKey[];
   onSettingsSaved?: () => void;
 }
 
 export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
   store,
   catalogs = [],
-  savedKeys = [],
   onSettingsSaved
 }) => {
   const [loading, setLoading] = useState(true);
@@ -81,13 +76,11 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
   // Calendar toggle
   const [showScheduleCalendar, setShowScheduleCalendar] = useState(true);
 
-  // Store's URL
-  const publicUrl = `${window.location.origin}/e/${store.id}/${slugify(store.name)}`;
+  // Selected wallets for each payment method
+  const [paymentWallets, setPaymentWallets] = useState<Record<string, string>>({});
 
-  // Check wallets availability
-  const hasPixWallet = savedKeys.some(k => k.walletType === 'PIX' || k.walletType === 'PIX_AUTO');
-  const hasCreditWallet = savedKeys.some(k => k.walletType === 'CREDIT_CARD');
-  const hasDebitWallet = savedKeys.some(k => k.walletType === 'DEBIT_CARD');
+  // Store's URL
+  const publicUrl = `${window.location.origin}/e/${slugify(store.name)}/${store.id}`;
 
   // Load ecommerce settings from Supabase
   useEffect(() => {
@@ -118,7 +111,32 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
           
           setInstallmentsEnabled(settings.installments_enabled);
           setMaxInstallments(settings.max_installments || 1);
-          setBusinessHours(settings.business_hours || []);
+          // Ensure all 7 days of the week are populated in the array
+          const loadedHours = settings.business_hours || [];
+          const completeHours = WEEKDAYS.map(w => {
+            const existing = loadedHours.find((h: any) => h.day === w.day);
+            return existing ? {
+              day: w.day,
+              open: existing.open || '08:00',
+              close: existing.close || '18:00',
+              closed: existing.closed ?? true,
+              is24h: !!existing.is24h,
+              hasInterval: !!existing.hasInterval,
+              open2: existing.open2 || '14:00',
+              close2: existing.close2 || '18:00'
+            } : {
+              day: w.day,
+              open: '08:00',
+              close: '18:00',
+              closed: true,
+              is24h: false,
+              hasInterval: false,
+              open2: '14:00',
+              close2: '18:00'
+            };
+          });
+          setBusinessHours(completeHours);
+          setPaymentWallets(settings.payment_wallets || {});
           setShowScheduleCalendar(settings.show_schedule_calendar !== false);
           setCheckoutFields(settings.checkout_fields || {
             name: { show: true, required: true },
@@ -151,7 +169,11 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
             day: w.day,
             open: '08:00',
             close: '18:00',
-            closed: w.day === 0 || w.day === 6 // Closed on weekends by default
+            closed: w.day === 0 || w.day === 6, // Closed on weekends by default
+            is24h: false,
+            hasInterval: false,
+            open2: '14:00',
+            close2: '18:00'
           }));
           setBusinessHours(defaultHours);
         }
@@ -177,34 +199,60 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
     );
   };
 
-  const togglePaymentMethod = (method: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD') => {
-    setPaymentMethods(prev => 
-      prev.includes(method) 
-        ? (prev.length > 1 ? prev.filter(m => m !== method) : prev) // keep at least one
-        : [...prev, method]
-    );
-  };
 
-  const handleDownPaymentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDownPaymentValueRaw(formatCurrencyInput(e.target.value));
-  };
 
-  const handleHourChange = (dayIndex: number, field: 'open' | 'close', val: string) => {
-    setBusinessHours(prev => prev.map(bh => {
-      if (bh.day === dayIndex) {
-        return { ...bh, [field]: val };
+  const handleHourChange = (dayIndex: number, field: 'open' | 'close' | 'open2' | 'close2', val: string) => {
+    setBusinessHours(prev => {
+      const existing = prev.find(bh => bh.day === dayIndex);
+      if (existing) {
+        return prev.map(bh => bh.day === dayIndex ? { ...bh, [field]: val } : bh);
+      } else {
+        return [...prev, { day: dayIndex, open: '08:00', close: '12:00', open2: '14:00', close2: '18:00', closed: false, [field]: val }];
       }
-      return bh;
-    }));
+    });
   };
 
   const toggleDayClosed = (dayIndex: number) => {
-    setBusinessHours(prev => prev.map(bh => {
-      if (bh.day === dayIndex) {
-        return { ...bh, closed: !bh.closed };
+    setBusinessHours(prev => {
+      const existing = prev.find(bh => bh.day === dayIndex);
+      if (existing) {
+        return prev.map(bh => bh.day === dayIndex ? { ...bh, closed: !bh.closed } : bh);
+      } else {
+        return [...prev, { day: dayIndex, open: '08:00', close: '18:00', closed: false }];
       }
-      return bh;
-    }));
+    });
+  };
+
+  const handleDayToggleField = (dayIndex: number, field: 'is24h' | 'hasInterval', val: boolean) => {
+    setBusinessHours(prev => {
+      const existing = prev.find(bh => bh.day === dayIndex);
+      if (existing) {
+        return prev.map(bh => {
+          if (bh.day === dayIndex) {
+            const updated = { ...bh, [field]: val };
+            if (field === 'is24h' && val) {
+              updated.hasInterval = false;
+              updated.open = '00:00';
+              updated.close = '23:59';
+            } else if (field === 'is24h' && !val) {
+              updated.open = '08:00';
+              updated.close = '18:00';
+            }
+            return updated;
+          }
+          return bh;
+        });
+      } else {
+        return [...prev, {
+          day: dayIndex,
+          open: field === 'is24h' && val ? '00:00' : '08:00',
+          close: field === 'is24h' && val ? '23:59' : '18:00',
+          closed: false,
+          [field]: val,
+          ...(field === 'hasInterval' && val ? { close: '12:00', open2: '14:00', close2: '18:00' } : {})
+        }];
+      }
+    });
   };
 
   const handleCheckoutFieldToggle = (field: keyof CheckoutFields, action: 'show' | 'required') => {
@@ -245,6 +293,7 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
         is_enabled: isEnabled,
         catalog_ids: selectedCatalogIds,
         payment_methods: paymentMethods,
+        payment_wallets: paymentWallets,
         down_payment_enabled: downPaymentEnabled,
         down_payment_value: downPaymentVal,
         down_payment_type: downPaymentType,
@@ -370,216 +419,38 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
           </div>
         </div>
 
-        {/* Dynamic configuration grids */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Catalogs selection list */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-800">Catálogos Exibidos</h3>
-              <p className="text-[11px] text-slate-450 mt-0.5">Escolha quais catálogos e produtos estarão visíveis no e-commerce</p>
-            </div>
-
-            {catalogs.length === 0 ? (
-              <div className="p-4 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-400">
-                Nenhum catálogo disponível. Crie um na aba "Catálogos".
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-                {catalogs.map(cat => (
-                  <label 
-                    key={cat.id} 
-                    className="flex items-center gap-3 p-3 rounded-xl border border-slate-150 hover:bg-slate-50 cursor-pointer transition-all"
-                  >
-                    <input 
-                      type="checkbox" 
-                      checked={selectedCatalogIds.includes(cat.id)}
-                      onChange={() => toggleCatalog(cat.id)}
-                      className="rounded text-pix focus:ring-pix border-slate-300 w-4 h-4"
-                    />
-                    <div className="flex-1">
-                      <span className="text-xs font-bold text-slate-700">{cat.name}</span>
-                      <p className="text-[10px] text-slate-450 line-clamp-1 mt-0.5">{cat.description || 'Sem descrição'}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
+        {/* Catalogs selection list (Full Width) */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-800">Catálogos Exibidos</h3>
+            <p className="text-[11px] text-slate-450 mt-0.5">Escolha quais catálogos e produtos estarão visíveis no e-commerce</p>
           </div>
 
-          {/* Payment Methods */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-800">Meios de Pagamento Online</h3>
-              <p className="text-[11px] text-slate-450 mt-0.5">Selecione as formas de pagamento disponíveis para o cliente</p>
+          {catalogs.length === 0 ? (
+            <div className="p-4 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-400">
+              Nenhum catálogo disponível. Crie um na aba "Catálogos".
             </div>
-
-            <div className="space-y-3">
-              {/* PIX */}
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-150 hover:bg-slate-50 cursor-pointer transition-all">
-                  <div className="flex items-center gap-3">
-                    <span className="bg-teal-50 border border-teal-100 text-teal-700 font-extrabold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">PIX</span>
-                    <span className="text-xs font-bold text-slate-700">PIX (QR Code & Copia/Cola)</span>
-                  </div>
-                  <input 
-                    type="checkbox" 
-                    checked={paymentMethods.includes('PIX')}
-                    onChange={() => togglePaymentMethod('PIX')}
-                    className="rounded text-pix focus:ring-pix border-slate-300 w-4 h-4"
-                  />
-                </label>
-                {!hasPixWallet && paymentMethods.includes('PIX') && (
-                  <div className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[10px] font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>Nenhuma carteira PIX cadastrada. Acesse a aba "Minhas Chaves" para cadastrar.</span>
-                  </div>
-                )}
-              </div>
-
-              {/* CREDIT CARD */}
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-150 hover:bg-slate-50 cursor-pointer transition-all">
-                  <div className="flex items-center gap-3">
-                    <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 font-extrabold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Crédito</span>
-                    <span className="text-xs font-bold text-slate-700">Cartão de Crédito</span>
-                  </div>
-                  <input 
-                    type="checkbox" 
-                    checked={paymentMethods.includes('CREDIT_CARD')}
-                    onChange={() => togglePaymentMethod('CREDIT_CARD')}
-                    className="rounded text-pix focus:ring-pix border-slate-300 w-4 h-4"
-                  />
-                </label>
-                {!hasCreditWallet && paymentMethods.includes('CREDIT_CARD') && (
-                  <div className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[10px] font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>Nenhum provedor de cartão de crédito cadastrado na aba "Minhas Chaves".</span>
-                  </div>
-                )}
-              </div>
-
-              {/* DEBIT CARD */}
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-150 hover:bg-slate-50 cursor-pointer transition-all">
-                  <div className="flex items-center gap-3">
-                    <span className="bg-blue-50 border border-blue-100 text-blue-700 font-extrabold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Débito</span>
-                    <span className="text-xs font-bold text-slate-700">Cartão de Débito</span>
-                  </div>
-                  <input 
-                    type="checkbox" 
-                    checked={paymentMethods.includes('DEBIT_CARD')}
-                    onChange={() => togglePaymentMethod('DEBIT_CARD')}
-                    className="rounded text-pix focus:ring-pix border-slate-300 w-4 h-4"
-                  />
-                </label>
-                {!hasDebitWallet && paymentMethods.includes('DEBIT_CARD') && (
-                  <div className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[10px] font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>Nenhum provedor de cartão de débito cadastrado na aba "Minhas Chaves".</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Down Payment & Installments Management */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Down Payment (Entrada) */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Regras de Valor de Entrada</h3>
-                <p className="text-[11px] text-slate-450 mt-0.5">Exija um adiantamento no agendamento ou pedido</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={downPaymentEnabled}
-                  onChange={(e) => setDownPaymentEnabled(e.target.checked)}
-                  className="sr-only peer" 
-                />
-                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pix"></div>
-              </label>
-            </div>
-
-            {downPaymentEnabled && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-fade-in">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Tipo de Entrada</label>
-                  <select
-                    value={downPaymentType}
-                    onChange={(e) => setDownPaymentType(e.target.value as 'percentage' | 'fixed')}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none font-bold"
-                  >
-                    <option value="percentage">Percentual (%)</option>
-                    <option value="fixed">Valor Fixo (R$)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">
-                    {downPaymentType === 'percentage' ? 'Percentual (%)' : 'Valor da Entrada'}
-                  </label>
-                  <div className="relative">
-                    {downPaymentType === 'fixed' && (
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
-                    )}
-                    <input
-                      type="text"
-                      value={downPaymentValueRaw}
-                      onChange={handleDownPaymentChange}
-                      placeholder={downPaymentType === 'percentage' ? '30,00' : '50,00'}
-                      className={`w-full py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:bg-white transition-all font-bold ${
-                        downPaymentType === 'fixed' ? 'pl-8 pr-3' : 'px-3'
-                      }`}
-                    />
-                    {downPaymentType === 'percentage' && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">%</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Installments (Parcelamento) */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Regras de Parcelamento</h3>
-                <p className="text-[11px] text-slate-450 mt-0.5">Ative pagamentos fracionados nas vendas</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={installmentsEnabled}
-                  onChange={(e) => setInstallmentsEnabled(e.target.checked)}
-                  className="sr-only peer" 
-                />
-                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pix"></div>
-              </label>
-            </div>
-
-            {installmentsEnabled && (
-              <div className="pt-2 animate-fade-in">
-                <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Máximo de Parcelas</label>
-                <select
-                  value={maxInstallments}
-                  onChange={(e) => setMaxInstallments(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none font-bold"
+          ) : (
+            <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+              {catalogs.map(cat => (
+                <label 
+                  key={cat.id} 
+                  className="flex items-center gap-3 p-3 rounded-xl border border-slate-150 hover:bg-slate-50 cursor-pointer transition-all"
                 >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(num => (
-                    <option key={num} value={num}>
-                      Até {num}x sem juros
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedCatalogIds.includes(cat.id)}
+                    onChange={() => toggleCatalog(cat.id)}
+                    className="rounded text-pix focus:ring-pix border-slate-300 w-4 h-4"
+                  />
+                  <div className="flex-1">
+                    <span className="text-xs font-bold text-slate-700">{cat.name}</span>
+                    <p className="text-[10px] text-slate-450 line-clamp-1 mt-0.5">{cat.description || 'Sem descrição'}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Business Hours Setup */}
@@ -597,15 +468,15 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
             {WEEKDAYS.map(wd => {
               const dayConfig = businessHours.find(bh => bh.day === wd.day) || { day: wd.day, open: '08:00', close: '18:00', closed: true };
               return (
-                <div key={wd.day} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 first:pt-0 last:pb-0">
-                  <div className="flex items-center gap-3 w-40">
+                <div key={wd.day} className="py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 first:pt-0 last:pb-0">
+                  <div className="flex items-center gap-3 w-40 flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => toggleDayClosed(wd.day)}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-all ${
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
                         dayConfig.closed
-                          ? 'bg-red-50 border-red-100 text-red-600'
-                          : 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                          ? 'bg-red-50 border-red-155 text-red-650'
+                          : 'bg-emerald-50 border-emerald-155 text-emerald-650'
                       }`}
                     >
                       {dayConfig.closed ? 'Fechado' : 'Aberto'}
@@ -614,20 +485,71 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
                   </div>
 
                   {!dayConfig.closed && (
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="time" 
-                        value={dayConfig.open}
-                        onChange={(e) => handleHourChange(wd.day, 'open', e.target.value)}
-                        className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
-                      />
-                      <span className="text-slate-400 text-xs">às</span>
-                      <input 
-                        type="time" 
-                        value={dayConfig.close}
-                        onChange={(e) => handleHourChange(wd.day, 'close', e.target.value)}
-                        className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
-                      />
+                    <div className="flex flex-wrap items-center gap-4 flex-1">
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!dayConfig.is24h}
+                            onChange={(e) => handleDayToggleField(wd.day, 'is24h', e.target.checked)}
+                            className="rounded text-pix focus:ring-pix border-slate-300 w-3.5 h-3.5"
+                          />
+                          <span className="text-[10px] text-slate-500 font-extrabold uppercase">24 Horas</span>
+                        </label>
+
+                        {!dayConfig.is24h && (
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!dayConfig.hasInterval}
+                              onChange={(e) => handleDayToggleField(wd.day, 'hasInterval', e.target.checked)}
+                              className="rounded text-pix focus:ring-pix border-slate-300 w-3.5 h-3.5"
+                            />
+                            <span className="text-[10px] text-slate-500 font-extrabold uppercase">Com Intervalo</span>
+                          </label>
+                        )}
+                      </div>
+
+                      {!dayConfig.is24h && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="time" 
+                              value={dayConfig.open || '08:00'}
+                              onChange={(e) => handleHourChange(wd.day, 'open', e.target.value)}
+                              className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
+                            />
+                            <span className="text-slate-400 text-xs">às</span>
+                            <input 
+                              type="time" 
+                              value={dayConfig.close || '12:00'}
+                              onChange={(e) => handleHourChange(wd.day, 'close', e.target.value)}
+                              className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
+                            />
+                          </div>
+
+                          {dayConfig.hasInterval && (
+                            <>
+                              <span className="text-slate-400 text-xs font-bold px-1">e</span>
+                              <div className="flex items-center gap-2">
+                                <input 
+                                  type="time" 
+                                  value={dayConfig.open2 || '14:00'}
+                                  onChange={(e) => handleHourChange(wd.day, 'open2', e.target.value)}
+                                  className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
+                                />
+                                <span className="text-slate-400 text-xs">às</span>
+                                <input 
+                                  type="time" 
+                                  value={dayConfig.close2 || '18:00'}
+                                  onChange={(e) => handleHourChange(wd.day, 'close2', e.target.value)}
+                                  className="bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-2 py-1 text-slate-800 focus:outline-none"
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

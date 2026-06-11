@@ -8,6 +8,10 @@ export interface Profile {
   role: 'admin' | 'tenant';
   subscription_plan_id?: string;
   subscription_status: string;
+  trade_name?: string;
+  legal_name?: string;
+  document?: string;
+  phone?: string;
   created_at: string;
   updated_at: string;
 }

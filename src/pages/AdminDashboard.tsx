@@ -43,6 +43,11 @@ interface TenantProfile {
   role: 'admin' | 'tenant';
   subscription_status: string;
   created_at: string;
+  subscription_plan_id?: string;
+  trade_name?: string;
+  legal_name?: string;
+  document?: string;
+  phone?: string;
   subscription_plans?: Plan;
 }
 
@@ -70,6 +75,18 @@ export const AdminDashboard: React.FC = () => {
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [tenantError, setTenantError] = useState('');
   const [isCreatingTenant, setIsCreatingTenant] = useState(false);
+
+  // Form Edição Tenant
+  const [isEditTenantModalOpen, setIsEditTenantModalOpen] = useState(false);
+  const [editingTenant, setEditingTenant] = useState<TenantProfile | null>(null);
+  const [editTradeName, setEditTradeName] = useState('');
+  const [editLegalName, setEditLegalName] = useState('');
+  const [editDocument, setEditDocument] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editSelectedPlanId, setEditSelectedPlanId] = useState('');
+  const [editSubscriptionStatus, setEditSubscriptionStatus] = useState('active');
+  const [editTenantError, setEditTenantError] = useState('');
+  const [isSavingTenant, setIsSavingTenant] = useState(false);
 
   // Form Novo Plano
   const [planId, setPlanId] = useState<string | null>(null);
@@ -262,6 +279,7 @@ export const AdminDashboard: React.FC = () => {
         .from('profiles')
         .select(`
           id, email, role, subscription_status, created_at,
+          trade_name, legal_name, document, phone, subscription_plan_id,
           subscription_plans(id, name, price)
         `)
         .eq('role', 'tenant')
@@ -275,6 +293,11 @@ export const AdminDashboard: React.FC = () => {
         role: p.role,
         subscription_status: p.subscription_status,
         created_at: p.created_at,
+        subscription_plan_id: p.subscription_plan_id,
+        trade_name: p.trade_name,
+        legal_name: p.legal_name,
+        document: p.document,
+        phone: p.phone,
         subscription_plans: p.subscription_plans ? p.subscription_plans : undefined
       }));
 
@@ -345,6 +368,54 @@ export const AdminDashboard: React.FC = () => {
       loadData();
     } catch (err: any) {
       alert('Erro ao excluir tenant: ' + err.message);
+    }
+  };
+
+  // Preparar e Abrir Modal de Edição de Tenant
+  const handleEditTenant = (tenant: TenantProfile) => {
+    setEditingTenant(tenant);
+    setEditTradeName(tenant.trade_name || '');
+    setEditLegalName(tenant.legal_name || '');
+    setEditDocument(tenant.document || '');
+    setEditPhone(tenant.phone || '');
+    setEditSelectedPlanId(tenant.subscription_plan_id || '');
+    setEditSubscriptionStatus(tenant.subscription_status || 'active');
+    setEditTenantError('');
+    setIsEditTenantModalOpen(true);
+  };
+
+  // Salvar Edição de Tenant
+  const handleSaveTenantEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditTenantError('');
+    setIsSavingTenant(true);
+
+    try {
+      if (!editingTenant) return;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          trade_name: editTradeName.trim() || null,
+          legal_name: editLegalName.trim() || null,
+          document: editDocument.trim() || null,
+          phone: editPhone.trim() || null,
+          subscription_plan_id: editSelectedPlanId || null,
+          subscription_status: editSubscriptionStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingTenant.id);
+
+      if (error) throw error;
+
+      setIsEditTenantModalOpen(false);
+      setEditingTenant(null);
+      alert('Tenant atualizado com sucesso!');
+      loadData();
+    } catch (err: any) {
+      setEditTenantError(err.message || 'Erro ao atualizar tenant.');
+    } finally {
+      setIsSavingTenant(false);
     }
   };
 
@@ -611,7 +682,8 @@ export const AdminDashboard: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
-                        <th className="pb-3">E-mail do Tenant</th>
+                        <th className="pb-3">Tenant / E-mail</th>
+                        <th className="pb-3">CPF/CNPJ & Contato</th>
                         <th className="pb-3">Plano Associado</th>
                         <th className="pb-3">Data de Registro</th>
                         <th className="pb-3">Status</th>
@@ -621,11 +693,38 @@ export const AdminDashboard: React.FC = () => {
                     <tbody className="divide-y divide-slate-800/60">
                       {tenants.map(t => (
                         <tr key={t.id} className="hover:bg-slate-800/20 text-slate-300">
-                          <td className="py-3.5 font-semibold">{t.email}</td>
+                          <td className="py-3.5 pr-4">
+                            <div className="font-bold text-slate-200">
+                              {t.trade_name || 'Sem Nome Fantasia'}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5 leading-none">
+                              {t.email}
+                            </div>
+                            {t.legal_name && (
+                              <div className="text-[9px] text-slate-500 font-semibold mt-1 truncate max-w-[200px]" title={t.legal_name}>
+                                Razão Social: {t.legal_name}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3.5 pr-4">
+                            <div className="font-mono text-slate-300">
+                              {t.document || 'Não informado'}
+                            </div>
+                            {t.phone && (
+                              <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                                Tel: {t.phone}
+                              </div>
+                            )}
+                          </td>
                           <td className="py-3.5">
-                            <span className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg font-bold text-[10px] uppercase border border-slate-700/60">
+                            <span className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg font-bold text-[10px] uppercase border border-slate-700/60 block w-max">
                               {t.subscription_plans?.name || 'Sem Plano'}
                             </span>
+                            {t.subscription_plans?.price !== undefined && (
+                              <div className="text-[9px] text-slate-500 font-semibold mt-1">
+                                R$ {t.subscription_plans.price.toFixed(2)}/mês
+                              </div>
+                            )}
                           </td>
                           <td className="py-3.5 font-mono text-[11px]">
                             {new Date(t.created_at).toLocaleDateString('pt-BR')}
@@ -641,6 +740,13 @@ export const AdminDashboard: React.FC = () => {
                             </span>
                           </td>
                           <td className="py-3.5 text-right">
+                            <button
+                              onClick={() => handleEditTenant(t)}
+                              className="p-1.5 hover:bg-teal-500/20 hover:text-teal-400 rounded-lg text-slate-500 transition-colors mr-1"
+                              title="Editar Perfil"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
                             <button
                               onClick={() => handleDeleteTenant(t.id)}
                               className="p-1.5 hover:bg-rose-500/20 hover:text-rose-400 rounded-lg text-slate-500 transition-colors"
@@ -1101,6 +1207,127 @@ export const AdminDashboard: React.FC = () => {
                   <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
                 ) : (
                   <span>Criar Acesso Tenant</span>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edição de Tenant */}
+      {isEditTenantModalOpen && editingTenant && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-3xl p-6 relative animate-slide-up">
+            <button 
+              onClick={() => { setIsEditTenantModalOpen(false); setEditingTenant(null); }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <div className="flex items-center gap-2.5 mb-6">
+              <div className="p-2 bg-teal-500/10 text-teal-400 rounded-xl">
+                <Edit className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white">Editar Tenant/Usuário</h3>
+                <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{editingTenant.email}</p>
+              </div>
+            </div>
+
+            {editTenantError && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold leading-relaxed">
+                {editTenantError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveTenantEdit} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Nome Fantasia</label>
+                  <input 
+                    type="text"
+                    placeholder="Ex: Minha Empresa"
+                    value={editTradeName}
+                    onChange={(e) => setEditTradeName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Razão Social / Nome Jurídico</label>
+                  <input 
+                    type="text"
+                    placeholder="Ex: Minha Empresa LTDA"
+                    value={editLegalName}
+                    onChange={(e) => setEditLegalName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">CPF/CNPJ</label>
+                  <input 
+                    type="text"
+                    placeholder="Ex: 00.000.000/0001-00"
+                    value={editDocument}
+                    onChange={(e) => setEditDocument(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Telefone / Contato</label>
+                  <input 
+                    type="text"
+                    placeholder="Ex: (11) 99999-9999"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Plano de Assinatura</label>
+                  <select
+                    value={editSelectedPlanId}
+                    onChange={(e) => setEditSelectedPlanId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="">Sem plano associado...</option>
+                    {plans.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} - R$ {p.price}/mês</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status do Acesso</label>
+                  <select
+                    value={editSubscriptionStatus}
+                    onChange={(e) => setEditSubscriptionStatus(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                  >
+                    <option value="active">Ativo (Acesso Liberado)</option>
+                    <option value="suspended">Suspenso (Acesso Bloqueado)</option>
+                    <option value="inactive">Inativo</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingTenant}
+                className="w-full bg-teal-500 hover:bg-teal-600 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-55 mt-4"
+              >
+                {isSavingTenant ? (
+                  <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <span>Salvar Alterações</span>
                 )}
               </button>
             </form>

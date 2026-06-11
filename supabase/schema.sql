@@ -36,6 +36,10 @@ CREATE TABLE public.profiles (
   role public.user_role NOT NULL DEFAULT 'tenant',
   subscription_plan_id UUID REFERENCES public.subscription_plans(id) ON DELETE SET NULL,
   subscription_status TEXT NOT NULL DEFAULT 'active', -- 'active', 'inactive', 'suspended'
+  trade_name TEXT,
+  legal_name TEXT,
+  document TEXT,
+  phone TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

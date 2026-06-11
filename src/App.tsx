@@ -113,8 +113,27 @@ const LandingOrRedirect = () => {
 
 // Componente principal do Tenant Workspace
 function MandaPixApp() {
-  const { user, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
+
+  const getFirstName = () => {
+    if (profile?.trade_name) {
+      return profile.trade_name.trim().split(' ')[0];
+    }
+    if (!user) return 'Usuário';
+    const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.first_name;
+    if (fullName) {
+      return fullName.split(' ')[0];
+    }
+    if (user.email) {
+      const emailName = user.email.split('@')[0];
+      const firstPart = emailName.split(/[\._-]/)[0];
+      return firstPart.charAt(0).toUpperCase() + firstPart.slice(1);
+    }
+    return 'Usuário';
+  };
+
+  const firstName = getFirstName();
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -1096,6 +1115,26 @@ function MandaPixApp() {
           </div>
         </div>
 
+        {/* Logged in User Profile Info (Desktop) */}
+        <div className="px-6 py-4 border-b border-slate-800/40 flex items-center justify-between gap-3 bg-slate-900/20">
+          <div className="flex items-center gap-3 truncate">
+            <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+              {firstName.charAt(0)}
+            </div>
+            <div className="truncate">
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
+              <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
+            </div>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0 animate-fade-in"
+            title="Sair da Conta"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+
         {/* Navigation Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
           {menuItems.map(item => {
@@ -1118,16 +1157,7 @@ function MandaPixApp() {
           })}
         </nav>
 
-        {/* Botão Sair no Desktop */}
-        <div className="px-4 mb-2">
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all border border-transparent hover:border-rose-500/20 active:scale-98"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sair da Conta</span>
-          </button>
-        </div>
+
 
         {/* Footer info in sidebar */}
         {primaryKey && (
@@ -1179,6 +1209,26 @@ function MandaPixApp() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* Logged in User Profile Info (Mobile) */}
+              <div className="flex items-center justify-between gap-3 bg-slate-900/40 p-3 rounded-2xl border border-slate-800/60">
+                <div className="flex items-center gap-3 truncate">
+                  <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                    {firstName.charAt(0)}
+                  </div>
+                  <div className="truncate">
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
+                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0"
+                  title="Sair da Conta"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
               <nav className="space-y-1">
                 {menuItems.map(item => {
                   const Icon = item.icon;
@@ -1200,13 +1250,7 @@ function MandaPixApp() {
                 })}
               </nav>
 
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-xs font-bold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sair da Conta</span>
-              </button>
+
             </div>
             {primaryKey && (
               <div className="bg-slate-800/50 p-4 rounded-xl text-xs space-y-1 border border-slate-800">

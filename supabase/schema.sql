@@ -581,6 +581,7 @@ CREATE TABLE IF NOT EXISTS public.ecommerce_settings (
     "phone": {"show": true, "required": true},
     "address": {"show": false, "required": false}
   }'::jsonb,
+  product_card_size TEXT NOT NULL DEFAULT 'medium',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

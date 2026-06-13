@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { 
   ShoppingBag, 
   ShoppingCart, 
+  Package, 
   Trash2, 
   Plus, 
   Minus, 
@@ -1220,67 +1221,91 @@ export const PublicStorefront: React.FC = () => {
                   <p className="text-xs text-slate-400 mt-1">Nenhum produto corresponde aos filtros ou busca.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div className={
+                  ecommerceSettings?.product_card_size === 'small' 
+                    ? 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4' 
+                    : ecommerceSettings?.product_card_size === 'large' 
+                    ? 'grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6' 
+                    : 'grid grid-cols-[repeat(auto-fill,minmax(255px,1fr))] gap-5'
+                }>
                   {filteredProducts.map(prod => {
                     const cartQty = cart.find(item => item.product.id === prod.id)?.quantity || 0;
+                    const size = ecommerceSettings?.product_card_size || 'medium';
+                    const cardPadding = size === 'small' ? 'p-2.5' : size === 'large' ? 'p-4' : 'p-3.5';
+                    const cardHeight = size === 'small' ? 'h-[150px]' : size === 'large' ? 'h-[190px]' : 'h-[170px]';
+                    const imgSize = size === 'small' ? 'w-20 h-20 min-w-[80px]' : size === 'large' ? 'w-28 h-28 min-w-[112px]' : 'w-24 h-24 min-w-[96px]';
+                    const titleSize = size === 'small' ? 'text-xs' : size === 'large' ? 'text-base' : 'text-sm';
+                    const descSize = size === 'small' ? 'text-[10px]' : size === 'large' ? 'text-xs' : 'text-[11px]';
+                    const priceSize = size === 'small' ? 'text-xs' : size === 'large' ? 'text-base' : 'text-sm';
+                    const iconSize = size === 'small' ? 'w-6 h-6' : size === 'large' ? 'w-10 h-10' : 'w-8 h-8';
+
                     return (
                       <div 
                         key={prod.id} 
-                        className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-subtle transition-all flex flex-col justify-between gap-4 group"
+                        className={`bg-white border border-slate-100 rounded-2xl ${cardPadding} ${cardHeight} shadow-sm hover:shadow-subtle transition-all flex flex-row items-center gap-3.5 group`}
                       >
-                        <div className="space-y-2">
-                          {prod.image && (
-                            <div className="w-full h-32 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 mb-2">
-                              <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
-                            </div>
+                        {/* Square Image next to info */}
+                        <div className={`${imgSize} aspect-square rounded-xl overflow-hidden bg-slate-50 border border-slate-100 flex-shrink-0 flex items-center justify-center`}>
+                          {prod.image ? (
+                            <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Package className={`${iconSize} text-slate-300`} />
                           )}
-                          <div className="flex justify-between items-start">
-                            <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full uppercase border ${
-                              prod.type === 'SERVICO'
-                                ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
-                                : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                            }`}>
-                              {prod.type === 'SERVICO' ? 'Serviço' : 'Produto'}
-                            </span>
-                          </div>
-
-                          <h3 className="font-extrabold text-slate-800 text-sm group-hover:text-pix transition-colors">{prod.name}</h3>
-                          <p className="text-[11px] text-slate-400 font-semibold line-clamp-2 leading-relaxed h-8">
-                            {prod.description || 'Sem descrição cadastrada'}
-                          </p>
                         </div>
 
-                        <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                          <div className="flex flex-col">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Preço</span>
-                            <span className="font-extrabold text-slate-800 text-sm">{formatBRL(prod.price)}</span>
+                        {/* Product Info & Actions column */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-between h-full">
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-start">
+                              <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full uppercase border ${
+                                prod.type === 'SERVICO'
+                                  ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
+                                  : 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                              }`}>
+                                {prod.type === 'SERVICO' ? 'Serviço' : 'Produto'}
+                              </span>
+                            </div>
+
+                            <h3 className={`font-extrabold text-slate-800 ${titleSize} group-hover:text-pix transition-colors truncate`} title={prod.name}>
+                              {prod.name}
+                            </h3>
+                            <p className={`${descSize} text-slate-400 font-semibold line-clamp-2 leading-relaxed`}>
+                              {prod.description || 'Sem descrição cadastrada'}
+                            </p>
                           </div>
 
-                          {cartQty > 0 ? (
-                            <div className="flex items-center gap-2 border border-slate-200 rounded-xl p-1 bg-slate-50">
-                              <button 
-                                onClick={() => updateQuantity(prod.id, -1)}
-                                className="p-1 hover:bg-slate-200 rounded text-slate-600"
-                              >
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <span className="text-xs font-bold px-1 text-slate-800">{cartQty}</span>
-                              <button 
-                                onClick={() => updateQuantity(prod.id, 1)}
-                                className="p-1 hover:bg-slate-200 rounded text-slate-600"
+                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-55 mt-1.5">
+                            <div className="flex flex-col">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Preço</span>
+                              <span className={`font-extrabold text-slate-800 ${priceSize}`}>{formatBRL(prod.price)}</span>
+                            </div>
+
+                            {cartQty > 0 ? (
+                              <div className="flex items-center gap-1.5 border border-slate-200 rounded-xl p-0.5 bg-slate-50">
+                                <button 
+                                  onClick={() => updateQuantity(prod.id, -1)}
+                                  className="p-1 hover:bg-slate-200 rounded text-slate-600"
+                                >
+                                  <Minus className="w-2.5 h-2.5" />
+                                </button>
+                                <span className="text-xs font-bold px-1 text-slate-800">{cartQty}</span>
+                                <button 
+                                  onClick={() => updateQuantity(prod.id, 1)}
+                                  className="p-1 hover:bg-slate-200 rounded text-slate-600"
+                                >
+                                  <Plus className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => addToCart(prod)}
+                                className="bg-slate-900 hover:bg-slate-850 text-white rounded-xl py-1 px-2.5 text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1"
                               >
                                 <Plus className="w-3 h-3" />
+                                <span>Adicionar</span>
                               </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => addToCart(prod)}
-                              className="bg-slate-900 hover:bg-slate-850 text-white rounded-xl py-1.5 px-3 text-xs font-bold transition-all active:scale-95 flex items-center gap-1"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Adicionar</span>
-                            </button>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

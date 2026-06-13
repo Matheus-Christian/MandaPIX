@@ -12,6 +12,7 @@ interface CatalogManagerProps {
   onAddProduct: (product: Omit<ProductService, 'id'>) => void;
   onEditProduct: (product: ProductService) => void;
   onDeleteProduct: (id: string) => void;
+  productCardSize?: 'small' | 'medium' | 'large';
 }
 
 export const CatalogManager: React.FC<CatalogManagerProps> = ({
@@ -23,6 +24,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
+  productCardSize = 'medium',
 }) => {
   // Navigation level state
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   // Cropper states
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const actualZoom = zoom >= 1 ? zoom : 1 / (2 - zoom);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -115,21 +118,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     if (!cropperSrc || !cropperImageRef.current) return;
     const img = cropperImageRef.current;
     const canvas = document.createElement('canvas');
-    canvas.width = 400;
-    canvas.height = 400;
+    canvas.width = 1080;
+    canvas.height = 1080;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, 400, 400);
+      ctx.fillRect(0, 0, 1080, 1080);
 
       const screenHeight = 256;
       const screenWidth = 256 * (img.naturalWidth / img.naturalHeight);
-      const scaleFactor = 400 / 208; // 208px is the cutout view inside the 256x256 container minus 24px borders
+      const scaleFactor = 1080 / 208; // 208px is the cutout view inside the 256x256 container minus 24px borders
       
-      const cW = screenWidth * zoom * scaleFactor;
-      const cH = screenHeight * zoom * scaleFactor;
-      const cX = 200 + offset.x * scaleFactor;
-      const cY = 200 + offset.y * scaleFactor;
+      const cW = screenWidth * actualZoom * scaleFactor;
+      const cH = screenHeight * actualZoom * scaleFactor;
+      const cX = 540 + offset.x * scaleFactor;
+      const cY = 540 + offset.y * scaleFactor;
       
       ctx.drawImage(img, cX - cW / 2, cY - cH / 2, cW, cH);
       
@@ -478,57 +481,80 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className="bg-white p-5 rounded-2xl border border-slate-100 hover:border-slate-200 shadow-sm flex flex-col justify-between transition-all group"
-                  >
-                    <div className="space-y-2.5">
-                      {product.image && (
-                        <div className="w-full h-32 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 mb-1">
+               <div className={
+                productCardSize === 'small' 
+                  ? 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4' 
+                  : productCardSize === 'large' 
+                  ? 'grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6' 
+                  : 'grid grid-cols-[repeat(auto-fill,minmax(255px,1fr))] gap-5'
+              }>
+                {filteredProducts.map((product) => {
+                  const cardPadding = productCardSize === 'small' ? 'p-2.5' : productCardSize === 'large' ? 'p-4' : 'p-3.5';
+                  const cardHeight = productCardSize === 'small' ? 'h-[150px]' : productCardSize === 'large' ? 'h-[190px]' : 'h-[170px]';
+                  const imgSize = productCardSize === 'small' ? 'w-20 h-20 min-w-[80px]' : productCardSize === 'large' ? 'w-28 h-28 min-w-[112px]' : 'w-24 h-24 min-w-[96px]';
+                  const titleSize = productCardSize === 'small' ? 'text-xs' : productCardSize === 'large' ? 'text-base' : 'text-sm';
+                  const descSize = productCardSize === 'small' ? 'text-[10px]' : productCardSize === 'large' ? 'text-xs' : 'text-[11px]';
+                  const priceSize = productCardSize === 'small' ? 'text-xs' : productCardSize === 'large' ? 'text-base' : 'text-sm';
+                  const iconSize = productCardSize === 'small' ? 'w-6 h-6' : productCardSize === 'large' ? 'w-10 h-10' : 'w-8 h-8';
+
+                  return (
+                    <div
+                      key={product.id}
+                      className={`bg-white ${cardPadding} ${cardHeight} rounded-2xl border border-slate-100 hover:border-slate-200 shadow-sm flex flex-row items-center gap-3.5 group`}
+                    >
+                      {/* Square Image next to info */}
+                      <div className={`${imgSize} aspect-square rounded-xl overflow-hidden bg-slate-50 border border-slate-100 flex-shrink-0 flex items-center justify-center`}>
+                        {product.image ? (
                           <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center">
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border ${
-                          product.type === 'SERVICO'
-                            ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
-                            : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                        }`}>
-                          {product.type === 'SERVICO' ? 'Serviço' : 'Produto'}
-                        </span>
-                        
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => openEditProduct(product)}
-                            className="p-1 rounded bg-slate-50 hover:bg-pix-light text-slate-400 hover:text-pix border border-slate-100 hover:border-pix/10 transition-all active:scale-90"
-                            title="Editar Item"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleProductDelete(product.id, product.name)}
-                            className="p-1 rounded bg-slate-50 hover:bg-red-50 border border-slate-100 hover:border-red-100 text-slate-300 hover:text-red-500 transition-all active:scale-90"
-                            title="Remover Item"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        ) : (
+                          <Package className={`${iconSize} text-slate-300`} />
+                        )}
                       </div>
 
-                      <h4 className="font-extrabold text-slate-800 text-base line-clamp-1">{product.name}</h4>
-                      <p className="text-slate-400 text-xs font-semibold line-clamp-2 min-h-8 leading-relaxed">
-                        {product.description || 'Sem descrição cadastrada'}
-                      </p>
-                    </div>
+                      {/* Product Info & Actions column */}
+                      <div className="flex-1 min-w-0 flex flex-col justify-between h-full">
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase border ${
+                              product.type === 'SERVICO'
+                                ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
+                                : 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                            }`}>
+                              {product.type === 'SERVICO' ? 'Serviço' : 'Produto'}
+                            </span>
+                            
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => openEditProduct(product)}
+                                className="p-1 rounded bg-slate-50 hover:bg-pix-light text-slate-400 hover:text-pix border border-slate-100 hover:border-pix/10 transition-all active:scale-90"
+                                title="Editar Item"
+                              >
+                                <Edit className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleProductDelete(product.id, product.name)}
+                                className="p-1 rounded bg-slate-50 hover:bg-red-50 border border-slate-100 hover:border-red-100 text-slate-300 hover:text-red-500 transition-all active:scale-90"
+                                title="Remover Item"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
 
-                    <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Valor Sugerido</span>
-                      <span className="font-extrabold text-slate-800 text-base">{formatBRL(product.price)}</span>
+                          <h4 className={`font-extrabold text-slate-800 ${titleSize} truncate`} title={product.name}>{product.name}</h4>
+                          <p className={`text-slate-455 ${descSize} font-semibold line-clamp-2 leading-relaxed`}>
+                            {product.description || 'Sem descrição cadastrada'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-50 mt-1.5">
+                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Valor Sugerido</span>
+                          <span className={`font-extrabold text-slate-800 ${priceSize}`}>{formatBRL(product.price)}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -682,7 +708,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Selecionar Foto
                     </label>
                     <p className="text-[9px] text-slate-400 leading-normal font-semibold">
-                      Enquadramento recomendado: quadrado (1:1, ex: 400x400px).
+                      Enquadramento recomendado: quadrado (1:1, ex: 1080x1080px).
                     </p>
                   </div>
                 </div>
@@ -729,7 +755,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
 
             <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
-              Arraste a imagem para reposicionar e use a barra abaixo para ajustar o zoom. A área central clara representa o enquadramento final quadrado (1:1, corte final de 400x400px).
+              Arraste a imagem para reposicionar e use a barra abaixo para ajustar o zoom. A área central clara representa o enquadramento final quadrado (1:1, corte final de 1080x1080px).
             </p>
 
             {/* Cropping box frame */}
@@ -751,7 +777,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   position: 'absolute',
                   left: '50%',
                   top: '50%',
-                  transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${zoom})`,
+                  transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${actualZoom})`,
                   transformOrigin: 'center',
                   maxHeight: 'none',
                   maxWidth: 'none',
@@ -776,7 +802,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
               <input
                 type="range"
-                min="1"
+                min="-2"
                 max="3"
                 step="0.05"
                 value={zoom}

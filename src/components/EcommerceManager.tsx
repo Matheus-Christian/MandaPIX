@@ -50,6 +50,7 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
   // Form states matching table columns
   const [isEnabled, setIsEnabled] = useState(false);
   const [selectedCatalogIds, setSelectedCatalogIds] = useState<string[]>([]);
+  const [productCardSize, setProductCardSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [paymentMethods, setPaymentMethods] = useState<Array<'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'>>(['PIX']);
   
   // Down payment states
@@ -138,6 +139,7 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
           setBusinessHours(completeHours);
           setPaymentWallets(settings.payment_wallets || {});
           setShowScheduleCalendar(settings.show_schedule_calendar !== false);
+          setProductCardSize(settings.product_card_size || 'medium');
           setCheckoutFields(settings.checkout_fields || {
             name: { show: true, required: true },
             document: { show: true, required: true },
@@ -156,6 +158,7 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
           setInstallmentsEnabled(false);
           setMaxInstallments(1);
           setShowScheduleCalendar(true);
+          setProductCardSize('medium');
           setCheckoutFields({
             name: { show: true, required: true },
             document: { show: true, required: true },
@@ -302,6 +305,7 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
         business_hours: businessHours,
         show_schedule_calendar: showScheduleCalendar,
         checkout_fields: finalizedCheckoutFields,
+        product_card_size: productCardSize,
         updated_at: new Date().toISOString()
       };
 
@@ -727,6 +731,40 @@ export const EcommerceManager: React.FC<EcommerceManagerProps> = ({
             
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-150 text-[11px] text-slate-500 leading-relaxed">
               Quando habilitado, se um produto/serviço que pertence a um catálogo vinculado a algum Calendário Ativo for adicionado ao carrinho, o cliente será obrigado a agendar um horário disponível no momento do checkout.
+            </div>
+          </div>
+
+          {/* Visual Settings: Card Size */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Globe className="w-4 h-4 text-pix" /> Visualização dos Itens
+              </h3>
+              <p className="text-[11px] text-slate-450 mt-0.5">
+                Escolha o tamanho dos cards de produtos/serviços nos catálogos e na página do e-commerce
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { value: 'small', label: 'Pequeno', desc: 'Mais itens por linha' },
+                { value: 'medium', label: 'Médio', desc: 'Layout padrão' },
+                { value: 'large', label: 'Grande', desc: 'Destaque visual' }
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setProductCardSize(opt.value)}
+                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center gap-1 ${
+                    productCardSize === opt.value
+                      ? 'bg-slate-900 border-slate-900 text-white shadow-sm'
+                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-350'
+                  }`}
+                >
+                  <span className="text-xs font-bold">{opt.label}</span>
+                  <span className={`text-[9px] ${productCardSize === opt.value ? 'text-slate-300' : 'text-slate-400'}`}>{opt.desc}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>

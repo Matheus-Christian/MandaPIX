@@ -828,6 +828,7 @@ export interface EcommerceSettings {
   business_hours: BusinessHourDay[];
   show_schedule_calendar: boolean;
   checkout_fields: CheckoutFields;
+  product_card_size?: 'small' | 'medium' | 'large';
   created_at?: string;
   updated_at?: string;
 }

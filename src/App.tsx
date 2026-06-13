@@ -1775,6 +1775,7 @@ function MandaPixApp() {
                     onAddProduct={handleAddProduct}
                     onEditProduct={handleEditProduct}
                     onDeleteProduct={handleDeleteProduct}
+                    productCardSize={ecommerceSettings?.product_card_size || 'medium'}
                   />
                 )}
 
@@ -1798,7 +1799,10 @@ function MandaPixApp() {
                   <EcommerceManager
                     store={stores.find(s => s.id === activeStoreId)!}
                     catalogs={catalogs.filter(c => c.storeId === activeStoreId)}
-                    onSettingsSaved={loadAllData}
+                    onSettingsSaved={() => {
+                      loadAllData();
+                      if (activeStoreId) loadEcommerceSettings(activeStoreId);
+                    }}
                   />
                 )}
 

@@ -66,10 +66,11 @@ interface CalendarListProps {
   onSelect: (cal: ScheduleCalendar) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
+  onEdit: (cal: ScheduleCalendar) => void;
 }
 
 const CalendarList: React.FC<CalendarListProps> = ({
-  calendars, slots, catalogs, onSelect, onDelete, onCreate,
+  calendars, slots, catalogs, onSelect, onDelete, onCreate, onEdit,
 }) => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -139,13 +140,22 @@ const CalendarList: React.FC<CalendarListProps> = ({
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={e => { e.stopPropagation(); if (confirm(`Excluir o calendário "${cal.name}"? Todos os slots serão excluídos.`)) onDelete(cal.id); }}
-                      className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
-                      title="Excluir calendário"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={e => { e.stopPropagation(); onEdit(cal); }}
+                        className="p-1.5 rounded-lg text-slate-300 hover:text-pix hover:bg-pix-light transition-all"
+                        title="Editar nome/catálogos"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); if (confirm(`Excluir o calendário "${cal.name}"? Todos os slots serão excluídos.`)) onDelete(cal.id); }}
+                        className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
+                        title="Excluir calendário"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Catalogs */}
@@ -212,11 +222,12 @@ interface CalendarDetailProps {
   onAddBulkSlots: (slots: Array<Omit<ScheduleSlot, 'id' | 'currentBookings'>>) => Promise<void>;
   onDeleteSlot: (slotId: string) => Promise<void>;
   onToggleSlot: (slotId: string, isEnabled: boolean) => Promise<void>;
+  onEdit: (cal: ScheduleCalendar) => void;
 }
 
 const CalendarDetail: React.FC<CalendarDetailProps> = ({
   calendar, slots, catalogs, onBack, onUpdateCalendar,
-  onAddSlot, onAddBulkSlots, onDeleteSlot, onToggleSlot,
+  onAddSlot, onAddBulkSlots, onDeleteSlot, onToggleSlot, onEdit,
 }) => {
   const [weekOffset, setWeekOffset] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -346,6 +357,13 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
           <h2 className="text-lg font-extrabold text-slate-800 truncate flex items-center gap-2">
             <CalendarClock className="w-5 h-5 text-pix flex-shrink-0" />
             {calendar.name}
+            <button
+              onClick={() => onEdit(calendar)}
+              className="p-1 rounded-lg text-slate-400 hover:text-pix hover:bg-slate-50 transition-all flex-shrink-0"
+              title="Editar nome e catálogos"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
           </h2>
           {assocCatalogs.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
@@ -473,19 +491,19 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
                       const status = getSlotStatus(slot);
                       const styles = slotStatusStyles[status];
                       return (
-                        <div key={slot.id} className={`group relative rounded-md border px-1 py-0.5 text-[8px] font-bold ${styles.badge}`}>
-                          <div className="flex items-center gap-0.5">
-                            <span className={`w-1 h-1 rounded-full flex-shrink-0 ${styles.dot}`} />
-                            <span className="font-mono">{slot.slotTime}</span>
+                        <div key={slot.id} className={`group relative rounded-lg border px-2 py-1.5 text-[10px] font-bold ${styles.badge}`}>
+                          <div className="flex items-center gap-1">
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${styles.dot}`} />
+                            <span className="font-mono text-[11px] font-black">{slot.slotTime}</span>
                           </div>
-                          <div className="text-[7px] opacity-60">{slot.currentBookings}/{slot.maxCapacity}</div>
-                          <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
-                            <button onClick={() => onToggleSlot(slot.id, !slot.isEnabled)} className="w-3.5 h-3.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-pix flex items-center justify-center shadow-sm">
+                          <div className="text-[9px] opacity-75 font-semibold mt-0.5">{slot.currentBookings}/{slot.maxCapacity}</div>
+                          <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex gap-1 z-10">
+                            <button onClick={() => onToggleSlot(slot.id, !slot.isEnabled)} className="w-4.5 h-4.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-pix flex items-center justify-center shadow-sm" title={slot.isEnabled ? "Desativar slot" : "Ativar slot"}>
                               <span className={`w-1.5 h-1.5 rounded-full block ${slot.isEnabled ? 'bg-pix' : 'bg-slate-300'}`} />
                             </button>
                             <button onClick={() => { if (confirm(`Excluir slot ${slot.slotTime}?`)) onDeleteSlot(slot.id); }}
-                              className="w-3.5 h-3.5 rounded-full bg-white border border-slate-200 text-slate-300 hover:text-red-500 flex items-center justify-center shadow-sm">
-                              <X className="w-2 h-2" />
+                              className="w-4.5 h-4.5 rounded-full bg-white border border-slate-200 text-slate-300 hover:text-red-500 flex items-center justify-center shadow-sm" title="Excluir slot">
+                              <X className="w-2.5 h-2.5" />
                             </button>
                           </div>
                         </div>
@@ -493,8 +511,8 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
                     })}
                     {!isPast && (
                       <button onClick={() => { setAddDate(dateStr); setShowAddModal(true); }}
-                        className="w-full rounded-md border border-dashed border-slate-200 text-slate-300 hover:border-pix hover:text-pix text-[8px] font-bold py-1 transition-all flex items-center justify-center gap-0.5">
-                        <Plus className="w-2 h-2" />
+                        className="w-full rounded-lg border border-dashed border-slate-300 text-slate-400 bg-slate-50/50 hover:bg-pix-light/20 hover:border-pix hover:text-pix py-1.5 transition-all flex items-center justify-center">
+                        <Plus className="w-4 h-4" />
                       </button>
                     )}
                   </div>
@@ -691,6 +709,12 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   const [newCalCatalogIds, setNewCalCatalogIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
+  // Edit calendar modal state
+  const [editingCalendar, setEditingCalendar] = useState<ScheduleCalendar | null>(null);
+  const [editCalName, setEditCalName] = useState('');
+  const [editCalCatalogIds, setEditCalCatalogIds] = useState<string[]>([]);
+  const [updating, setUpdating] = useState(false);
+
   const activeCalendar = calendars.find(c => c.id === activeCalendarId);
   const activeSlots = activeCalendar
     ? slots.filter(s => s.calendarId === activeCalendar.id)
@@ -707,6 +731,27 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
     } finally { setCreating(false); }
   };
 
+  const handleStartEdit = (cal: ScheduleCalendar) => {
+    setEditingCalendar(cal);
+    setEditCalName(cal.name);
+    setEditCalCatalogIds(cal.catalogIds);
+  };
+
+  const handleUpdateCalendarDetails = async () => {
+    if (!editingCalendar || !editCalName.trim()) return;
+    setUpdating(true);
+    try {
+      await onUpdateCalendar({
+        ...editingCalendar,
+        name: editCalName.trim(),
+        catalogIds: editCalCatalogIds,
+      });
+      setEditingCalendar(null);
+      setEditCalName('');
+      setEditCalCatalogIds([]);
+    } finally { setUpdating(false); }
+  };
+
   return (
     <>
       {activeCalendar ? (
@@ -720,6 +765,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           onAddBulkSlots={onAddBulkSlots}
           onDeleteSlot={onDeleteSlot}
           onToggleSlot={onToggleSlot}
+          onEdit={handleStartEdit}
         />
       ) : (
         <CalendarList
@@ -729,6 +775,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           onSelect={cal => setActiveCalendarId(cal.id)}
           onDelete={onDeleteCalendar}
           onCreate={() => setShowCreateModal(true)}
+          onEdit={handleStartEdit}
         />
       )}
 
@@ -831,6 +878,113 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
                   {creating
                     ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Criando...</>
                     : <><Plus className="w-4 h-4" />Criar Calendário</>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === MODAL: Edit Calendar === */}
+      {editingCalendar && (
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden border border-slate-100 shadow-2xl">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-pix" /> Editar Calendário
+              </h3>
+              <button onClick={() => { setEditingCalendar(null); setEditCalName(''); setEditCalCatalogIds([]); }}
+                className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-5">
+              {/* Name */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Nome do Calendário</label>
+                <input
+                  type="text"
+                  placeholder={`Ex: ${storeName}`}
+                  value={editCalName}
+                  onChange={e => setEditCalName(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                />
+                <p className="text-[10px] text-slate-400 mt-1.5 ml-0.5">Um nome descritivo que identifique este calendário (ex: nome da loja, serviço ou turno).</p>
+              </div>
+
+              {/* Catalogs */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">
+                  Associar a Catálogos <span className="text-red-400">*</span>
+                </label>
+                {catalogs.length === 0 ? (
+                  <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-700 font-semibold">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    Nenhum catálogo disponível nesta loja. Crie um catálogo primeiro.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {catalogs.map(cat => {
+                      const selected = editCalCatalogIds.includes(cat.id);
+                      // Check if already used in another calendar
+                      const usedBy = calendars.find(cal => cal.catalogIds.includes(cat.id));
+                      return (
+                        <label
+                          key={cat.id}
+                          className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                            selected
+                              ? 'bg-pix-light border-pix/30'
+                              : 'bg-slate-50 border-slate-100 hover:border-slate-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => setEditCalCatalogIds(prev =>
+                              prev.includes(cat.id) ? prev.filter(x => x !== cat.id) : [...prev, cat.id]
+                            )}
+                            className="w-4 h-4 accent-pix rounded"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-bold truncate ${selected ? 'text-pix' : 'text-slate-700'}`}>
+                              {cat.name}
+                            </p>
+                            {cat.description && (
+                              <p className="text-[10px] text-slate-400 truncate">{cat.description}</p>
+                            )}
+                          </div>
+                          {usedBy && usedBy.id !== editingCalendar.id && (
+                            <span className="text-[9px] text-amber-600 font-bold flex items-center gap-0.5 flex-shrink-0">
+                              <BookOpen className="w-3 h-3" /> {usedBy.name}
+                            </span>
+                          )}
+                          <Tag className={`w-4 h-4 flex-shrink-0 ${selected ? 'text-pix' : 'text-slate-300'}`} />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {editCalCatalogIds.length > 0 && (
+                  <p className="text-[10px] text-pix font-bold mt-1.5 ml-0.5 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> {editCalCatalogIds.length} catálogo{editCalCatalogIds.length !== 1 ? 's' : ''} selecionado{editCalCatalogIds.length !== 1 ? 's' : ''}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => { setEditingCalendar(null); setEditCalName(''); setEditCalCatalogIds([]); }}
+                  className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-xl transition-all text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleUpdateCalendarDetails}
+                  disabled={!editCalName.trim() || editCalCatalogIds.length === 0 || updating}
+                  className="flex-1 bg-pix hover:bg-pix-dark disabled:bg-slate-300 text-white font-bold py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 text-sm"
+                >
+                  {updating
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Salvando...</>
+                    : <><Edit2 className="w-4 h-4" />Salvar Alterações</>
                   }
                 </button>
               </div>

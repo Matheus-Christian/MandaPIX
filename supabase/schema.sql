@@ -40,6 +40,7 @@ CREATE TABLE public.profiles (
   legal_name TEXT,
   document TEXT,
   phone TEXT,
+  ramo_empresa TEXT DEFAULT 'varejo',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -119,6 +120,8 @@ CREATE TABLE public.products (
   price NUMERIC(10, 2) NOT NULL,
   description TEXT,
   image TEXT,
+  stock_quantity INTEGER DEFAULT 10,
+  commission_rate NUMERIC(5, 2) DEFAULT 50.00,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -169,7 +172,8 @@ CREATE TABLE public.orders (
   client_document TEXT,
   items JSONB NOT NULL, -- Estrutura: [{productServiceId, name, quantity, price}]
   total_amount NUMERIC(10, 2) NOT NULL,
-  status public.order_status NOT NULL DEFAULT 'PENDENTE',
+  status TEXT NOT NULL DEFAULT 'PENDENTE',
+  commission_split JSONB,
   date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   invoice_id UUID REFERENCES public.invoices(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -298,13 +302,14 @@ BEGIN
   -- Tentar obter o ID do plano gratuito por padrão
   SELECT id INTO v_default_plan_id FROM public.subscription_plans WHERE name = 'Gratuito' LIMIT 1;
 
-  INSERT INTO public.profiles (id, email, role, subscription_plan_id, subscription_status)
+  INSERT INTO public.profiles (id, email, role, subscription_plan_id, subscription_status, ramo_empresa)
   VALUES (
     new.id,
     new.email,
     COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'tenant'::public.user_role),
     COALESCE((new.raw_user_meta_data->>'subscription_plan_id')::uuid, v_default_plan_id),
-    COALESCE(new.raw_user_meta_data->>'subscription_status', 'active')
+    COALESCE(new.raw_user_meta_data->>'subscription_status', 'active'),
+    COALESCE(new.raw_user_meta_data->>'ramo_empresa', 'varejo')
   );
   RETURN new;
 END;
@@ -595,6 +600,67 @@ CREATE POLICY "Tenants gerenciam suas configurações de e-commerce"
 CREATE POLICY "Leitura pública de configurações de e-commerce"
   ON public.ecommerce_settings FOR SELECT
   USING (true);
+
+
+-- ====================================================================
+-- 11. Ramos de Atuação (Business Branches)
+-- ====================================================================
+
+CREATE TABLE IF NOT EXISTS public.business_branches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  initial_trigger TEXT NOT NULL,
+  focus TEXT NOT NULL,
+  order_status_flow JSONB NOT NULL DEFAULT '[]'::jsonb,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.business_branches ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Leitura pública de ramos"
+  ON public.business_branches FOR SELECT
+  USING (true);
+
+CREATE POLICY "Apenas administradores gerenciam ramos"
+  ON public.business_branches FOR ALL
+  USING (public.is_admin());
+
+-- Seed de Ramos de Atuação Padrão
+INSERT INTO public.business_branches (key, name, initial_trigger, focus, order_status_flow, config) VALUES
+(
+  'varejo', 
+  'Varejo / Conveniência / Loja Física', 
+  'Produto / Código de Barras', 
+  'Velocidade de fechamento no caixa e controle de estoque', 
+  '["REGISTRO_ITENS", "PAGAMENTO_PIX", "VENDA_CONCLUIDA"]'::jsonb,
+  '{"hide_agenda": true, "hide_kitchen": true, "main_screen": "pdv"}'::jsonb
+),
+(
+  'servicos', 
+  'Serviços / Salão de Beleza / Clínicas / Estética', 
+  'Tempo / Horário (Agenda)', 
+  'Gestão de horários, ocupação de profissionais e comissões/repasses', 
+  '["AGENDAMENTO", "CHECK_IN", "CHECKOUT", "PAGAMENTO", "DIVISAO_COMISSAO"]'::jsonb,
+  '{"hide_delivery": true, "hide_kitchen": true, "main_screen": "schedule"}'::jsonb
+),
+(
+  'alimentacao', 
+  'Alimentação / Lanches / Delivery / Restaurantes', 
+  'Pedido (Cardápio Digital ou Balcão)', 
+  'Comunicação entre recepção, produção (cozinha) e entrega', 
+  '["ENTRADA_PEDIDO", "CONFIRMACAO_PAGAMENTO", "PRODUCAO_COZINHA", "LOGISTICA_ENVIO", "PEDIDO_ENTREGUE"]'::jsonb,
+  '{"hide_agenda": true, "main_screen": "orders"}'::jsonb
+)
+ON CONFLICT (key) DO UPDATE SET
+  name = EXCLUDED.name,
+  initial_trigger = EXCLUDED.initial_trigger,
+  focus = EXCLUDED.focus,
+  order_status_flow = EXCLUDED.order_status_flow,
+  config = EXCLUDED.config;
+
 
 
 

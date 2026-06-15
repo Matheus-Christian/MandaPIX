@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays } from 'lucide-react';
+import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays, Sparkles, Minus, Plus } from 'lucide-react';
 import { formatBRL } from '../utils/pix';
-import type { Order, Invoice } from '../utils/pix';
+import type { Order, Invoice, ProductService } from '../utils/pix';
+import { supabase } from '../utils/supabaseClient';
 
 interface OrderManagerProps {
   orders: Order[];
@@ -14,6 +15,8 @@ interface OrderManagerProps {
     status: 'PAGO' | 'PENDENTE',
     paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'
   ) => void;
+  activeBranch?: any;
+  products?: ProductService[];
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
@@ -21,11 +24,19 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   invoices,
   onCancelOrder,
   onUpdateOrderStatus,
-  onUpdateInstallmentStatus
+  onUpdateInstallmentStatus,
+  activeBranch,
+  products
 }) => {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   
+  // Checkout comissão state
+  const [checkoutOrder, setCheckoutOrder] = useState<Order | null>(null);
+  const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
+  const [selectedExtraProductId, setSelectedExtraProductId] = useState('');
+  const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
+
   // View Modes: PDV (operational) or AGENDA (calendar schedule)
   const [viewMode, setViewMode] = useState<'PDV' | 'AGENDA'>(() => {
     const saved = localStorage.getItem('manda_pix_view_mode');
@@ -45,6 +56,130 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   useEffect(() => {
     localStorage.setItem('manda_pix_pdv_sub_mode', pdvSubMode);
   }, [pdvSubMode]);
+
+  // Adjust view mode based on active branch
+  useEffect(() => {
+    if (activeBranch?.key === 'servicos') {
+      if (viewMode !== 'AGENDA') setViewMode('AGENDA');
+    } else if (activeBranch?.config?.hide_agenda && viewMode !== 'PDV') {
+      setViewMode('PDV');
+    }
+  }, [activeBranch, viewMode]);
+
+  useEffect(() => {
+    if (activeBranch?.config?.hide_kitchen && pdvSubMode !== 'LIST') {
+      setPdvSubMode('LIST');
+    }
+  }, [activeBranch, pdvSubMode]);
+
+  // Sync checkout items when checkoutOrder opens
+  useEffect(() => {
+    if (checkoutOrder) {
+      setCheckoutItems(checkoutOrder.items.map((item: any) => {
+        const p = products?.find(prod => prod.id === item.productServiceId || prod.name === item.name);
+        return {
+          ...item,
+          commission_rate: p?.commission_rate ?? 50.00
+        };
+      }));
+    } else {
+      setCheckoutItems([]);
+    }
+  }, [checkoutOrder, products]);
+
+  const addExtraProduct = () => {
+    if (!selectedExtraProductId || !products) return;
+    const prod = products.find(p => p.id === selectedExtraProductId);
+    if (!prod) return;
+
+    const existing = checkoutItems.find(item => item.productServiceId === prod.id);
+    if (existing) {
+      setCheckoutItems(checkoutItems.map(item => 
+        item.productServiceId === prod.id 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+    } else {
+      setCheckoutItems([...checkoutItems, {
+        productServiceId: prod.id,
+        name: prod.name,
+        quantity: 1,
+        price: prod.price,
+        commission_rate: prod.commission_rate ?? 50.00
+      }]);
+    }
+    setSelectedExtraProductId('');
+  };
+
+  const updateCheckoutItemQty = (idx: number, delta: number) => {
+    const item = checkoutItems[idx];
+    const newQty = item.quantity + delta;
+    if (newQty <= 0) {
+      setCheckoutItems(checkoutItems.filter((_, i) => i !== idx));
+    } else {
+      setCheckoutItems(checkoutItems.map((it, i) => i === idx ? { ...it, quantity: newQty } : it));
+    }
+  };
+
+  const updateCheckoutItemRate = (idx: number, rate: number) => {
+    const bounded = Math.max(0, Math.min(100, rate));
+    setCheckoutItems(checkoutItems.map((it, i) => i === idx ? { ...it, commission_rate: bounded } : it));
+  };
+
+  const checkoutTotal = checkoutItems.reduce((sum, item: any) => sum + (item.price * item.quantity), 0);
+  const professionalTotal = checkoutItems.reduce((sum, item: any) => {
+    const rate = item.commission_rate ?? 50;
+    return sum + (item.price * item.quantity * rate / 100);
+  }, 0);
+  const storeTotal = checkoutTotal - professionalTotal;
+
+  const handleConfirmCheckout = async () => {
+    if (!checkoutOrder) return;
+    setIsProcessingCheckout(true);
+    try {
+      const totalRate = checkoutItems.reduce((sum, item: any) => sum + (item.commission_rate ?? 50), 0);
+      const avgRate = checkoutItems.length > 0 ? parseFloat((totalRate / checkoutItems.length).toFixed(2)) : 50;
+
+      const split = {
+        professionalAmount: parseFloat(professionalTotal.toFixed(2)),
+        storeAmount: parseFloat(storeTotal.toFixed(2)),
+        rate: avgRate
+      };
+
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          items: checkoutItems.map((item: any) => ({
+            productServiceId: item.productServiceId,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price
+          })),
+          total_amount: checkoutTotal,
+          commission_split: split,
+          status: 'DIVISAO_COMISSAO'
+        })
+        .eq('id', checkoutOrder.id);
+
+      if (error) throw error;
+
+      setSelectedOrder((prev: Order | null) => prev ? {
+        ...prev,
+        items: checkoutItems,
+        totalAmount: checkoutTotal,
+        status: 'DIVISAO_COMISSAO',
+        commission_split: split
+      } : null);
+
+      onUpdateOrderStatus(checkoutOrder.id, 'DIVISAO_COMISSAO');
+      setCheckoutOrder(null);
+      alert('Checkout realizado com sucesso! Divisão de comissão registrada.');
+    } catch (err: any) {
+      alert('Erro ao realizar checkout: ' + err.message);
+    } finally {
+      setIsProcessingCheckout(false);
+    }
+  };
 
   // Details Modal State
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -112,11 +247,50 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
     return map;
   }, [orders]);
 
+  const formatStatusLabel = (status: string) => {
+    return status
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  };
+
+  const getNextActionLabel = (nextStatus: string) => {
+    if (!nextStatus) return '';
+    const upper = nextStatus.toUpperCase();
+    if (upper === 'APROVADO') return 'Aprovar';
+    if (upper === 'PREPARACAO') return 'Preparar';
+    if (upper === 'A_CAMINHO') return 'Despachar';
+    if (upper === 'ENTREGUE') return 'Entregar';
+    if (upper === 'CHECK_IN') return 'Check-in';
+    if (upper === 'CHECKOUT') return 'Checkout';
+    if (upper === 'PAGAMENTO') return 'Pagar';
+    if (upper === 'DIVISAO_COMISSAO') return 'Concluir repasse';
+    return `Ir para ${formatStatusLabel(nextStatus)}`;
+  };
+
+  const getStatusBadgeClass = (status: string) => {
+    const upper = status.toUpperCase();
+    if (upper === 'PENDENTE' || upper === 'AGENDAMENTO') return 'bg-amber-50 text-amber-700 border-amber-100';
+    if (upper === 'APROVADO' || upper === 'CHECK_IN') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+    if (upper === 'PREPARACAO' || upper === 'CHECKOUT') return 'bg-purple-50 text-purple-700 border-purple-100';
+    if (upper === 'A_CAMINHO' || upper === 'PAGAMENTO') return 'bg-sky-50 text-sky-700 border-sky-100';
+    if (upper === 'ENTREGUE' || upper === 'DIVISAO_COMISSAO' || upper === 'VENDA_CONCLUIDA' || upper === 'PEDIDO_ENTREGUE') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+    if (upper === 'CANCELADO') return 'bg-red-50 text-red-700 border-red-100';
+    return 'bg-slate-50 text-slate-700 border-slate-100';
+  };
+
+  const statusFlow: string[] = useMemo(() => {
+    if (activeBranch && Array.isArray(activeBranch.order_status_flow)) {
+      return activeBranch.order_status_flow;
+    }
+    return ['PENDENTE', 'APROVADO', 'PREPARACAO', 'A_CAMINHO', 'ENTREGUE'];
+  }, [activeBranch]);
+
   // Statistics
   const totalCount = orders.length;
-  const pendenteCount = orders.filter(o => o.status === 'PENDENTE').length;
-  const emAndamentoCount = orders.filter(o => o.status === 'APROVADO' || o.status === 'PREPARACAO' || o.status === 'A_CAMINHO').length;
-  const entregueCount = orders.filter(o => o.status === 'ENTREGUE').length;
+  const pendenteCount = orders.filter(o => o.status === 'PENDENTE' || o.status === 'AGENDAMENTO').length;
+  const emAndamentoCount = orders.filter(o => o.status === 'APROVADO' || o.status === 'PREPARACAO' || o.status === 'A_CAMINHO' || o.status === 'CHECK_IN' || o.status === 'CHECKOUT' || o.status === 'PAGAMENTO').length;
+  const entregueCount = orders.filter(o => o.status === 'ENTREGUE' || o.status === 'DIVISAO_COMISSAO' || o.status === 'VENDA_CONCLUIDA' || o.status === 'PEDIDO_ENTREGUE').length;
 
   const handleCancelClick = (id: string, number: string) => {
     if (confirm(`Deseja realmente cancelar o pedido ${number}? A cobrança vinculada a ele não será excluída automaticamente.`)) {
@@ -159,60 +333,64 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
           </p>
         </div>
 
-        {/* View Mode Toggle Controls */}
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Main View Mode Selector (PDV vs Agenda) */}
-          <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-150 gap-1">
-            <button
-              onClick={() => setViewMode('PDV')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
-                viewMode === 'PDV'
-                  ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <ShoppingCart className="w-3.5 h-3.5" /> PDV
-            </button>
-            <button
-              onClick={() => setViewMode('AGENDA')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
-                viewMode === 'AGENDA'
-                  ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <CalendarDays className="w-3.5 h-3.5" /> Agenda
-            </button>
-          </div>
+          {/* View Mode Toggle Controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Main View Mode Selector (PDV vs Agenda) */}
+            {!activeBranch?.config?.hide_agenda && activeBranch?.key !== 'servicos' && (
+              <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-150 gap-1">
+                <button
+                  onClick={() => setViewMode('PDV')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
+                    viewMode === 'PDV'
+                      ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <ShoppingCart className="w-3.5 h-3.5" /> PDV
+                </button>
+                <button
+                  onClick={() => setViewMode('AGENDA')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
+                    viewMode === 'AGENDA'
+                      ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" /> Agenda
+                </button>
+              </div>
+            )}
 
-          {/* Sub-mode selector (only visible for PDV) */}
-          {viewMode === 'PDV' && (
-            <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-150 gap-1 animate-fade-in">
-              <button
-                onClick={() => setPdvSubMode('LIST')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
-                  pdvSubMode === 'LIST'
-                    ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-                title="Visualizar em Lista"
-              >
-                <List className="w-3.5 h-3.5" /> Lista
-              </button>
-              <button
-                onClick={() => setPdvSubMode('KDS')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
-                  pdvSubMode === 'KDS'
-                    ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-                title="Visualizar Painel KDS"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" /> KDS
-              </button>
-            </div>
-          )}
-        </div>
+            {/* Sub-mode selector (only visible for PDV) */}
+            {viewMode === 'PDV' && (
+              <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-150 gap-1 animate-fade-in">
+                <button
+                  onClick={() => setPdvSubMode('LIST')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
+                    pdvSubMode === 'LIST'
+                      ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                  title="Visualizar em Lista"
+                >
+                  <List className="w-3.5 h-3.5" /> Lista
+                </button>
+                {!activeBranch?.config?.hide_kitchen && (
+                  <button
+                    onClick={() => setPdvSubMode('KDS')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 ${
+                      pdvSubMode === 'KDS'
+                        ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                    title="Visualizar Painel KDS"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" /> KDS
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
       </div>
 
       {/* Body */}
@@ -280,16 +458,8 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               {/* Status Select Tabs */}
               <div className="flex flex-wrap bg-slate-50 border border-slate-200 rounded-xl p-0.5 shadow-sm self-start gap-0.5">
-                {(['ALL', 'PENDENTE', 'APROVADO', 'PREPARACAO', 'A_CAMINHO', 'ENTREGUE', 'CANCELADO'] as const).map(f => {
-                  const label = {
-                    ALL: 'Todos',
-                    PENDENTE: 'Pendentes',
-                    APROVADO: 'Aprovados',
-                    PREPARACAO: 'Preparação',
-                    A_CAMINHO: 'A Caminho',
-                    ENTREGUE: 'Entregues',
-                    CANCELADO: 'Cancelados'
-                  }[f];
+                {['ALL', ...statusFlow, 'CANCELADO'].map(f => {
+                  const label = f === 'ALL' ? 'Todos' : formatStatusLabel(f);
                   
                   return (
                     <button
@@ -336,14 +506,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-50 font-medium text-slate-600">
                       {filteredOrders.map((order) => {
-                        const statusConfig = {
-                          PENDENTE: 'bg-amber-50 text-amber-700 border-amber-100',
-                          APROVADO: 'bg-indigo-50 text-indigo-700 border-indigo-100',
-                          PREPARACAO: 'bg-purple-50 text-purple-700 border-purple-100',
-                          A_CAMINHO: 'bg-sky-50 text-sky-700 border-sky-100',
-                          ENTREGUE: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-                          CANCELADO: 'bg-red-50 text-red-700 border-red-100'
-                        }[order.status];
+                        const statusConfig = getStatusBadgeClass(order.status);
 
                         return (
                           <tr key={order.id} className="hover:bg-slate-50/40 transition-colors">
@@ -378,12 +541,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                             </td>
                             <td className="py-3.5 px-4">
                               <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold uppercase ${statusConfig}`}>
-                                {order.status === 'PENDENTE' && 'Pendente'}
-                                {order.status === 'APROVADO' && 'Aprovado'}
-                                {order.status === 'PREPARACAO' && 'Preparação'}
-                                {order.status === 'A_CAMINHO' && 'A Caminho'}
-                                {order.status === 'ENTREGUE' && 'Entregue'}
-                                {order.status === 'CANCELADO' && 'Cancelado'}
+                                {formatStatusLabel(order.status)}
                               </span>
                             </td>
                             <td className="py-3.5 px-4">
@@ -434,16 +592,25 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
             {/* Kanban Columns */}
             <div className="flex gap-4 overflow-x-auto pb-4 items-start select-none no-scrollbar">
-              {(['PENDENTE', 'APROVADO', 'PREPARACAO', 'A_CAMINHO', 'ENTREGUE'] as const).map(columnStatus => {
+              {statusFlow.map((columnStatus: string, idx: number) => {
                 const columnOrders = filteredOrders.filter(o => o.status === columnStatus);
                 
+                const bgs = ['bg-amber-50/50', 'bg-indigo-50/50', 'bg-purple-50/50', 'bg-sky-50/50', 'bg-emerald-55/50'];
+                const borders = ['border-amber-100', 'border-indigo-100', 'border-purple-100', 'border-sky-100', 'border-emerald-100'];
+                const texts = ['text-amber-800', 'text-indigo-800', 'text-purple-800', 'text-sky-800', 'text-emerald-800'];
+                const dots = ['bg-amber-400', 'bg-indigo-500', 'bg-purple-500', 'bg-sky-500', 'bg-emerald-500'];
+
+                const nextStatus = idx < statusFlow.length - 1 ? statusFlow[idx + 1] : '';
+
                 const columnConfig = {
-                  PENDENTE:   { title: 'Pendentes',      bg: 'bg-amber-50/50', border: 'border-amber-100', text: 'text-amber-800', dot: 'bg-amber-400', nextLabel: 'Aprovar', nextStatus: 'APROVADO' },
-                  APROVADO:   { title: 'Aprovados',      bg: 'bg-indigo-50/50', border: 'border-indigo-100', text: 'text-indigo-800', dot: 'bg-indigo-500', nextLabel: 'Preparar', nextStatus: 'PREPARACAO' },
-                  PREPARACAO: { title: 'Em Preparação',  bg: 'bg-purple-50/50', border: 'border-purple-100', text: 'text-purple-800', dot: 'bg-purple-500', nextLabel: 'Despachar', nextStatus: 'A_CAMINHO' },
-                  A_CAMINHO:  { title: 'A Caminho',      bg: 'bg-sky-50/50', border: 'border-sky-100', text: 'text-sky-800', dot: 'bg-sky-500', nextLabel: 'Entregar', nextStatus: 'ENTREGUE' },
-                  ENTREGUE:   { title: 'Entregues',      bg: 'bg-emerald-50/50', border: 'border-emerald-100', text: 'text-emerald-800', dot: 'bg-emerald-500', nextLabel: '', nextStatus: '' }
-                }[columnStatus];
+                  title: formatStatusLabel(columnStatus),
+                  bg: bgs[idx % bgs.length],
+                  border: borders[idx % borders.length],
+                  text: texts[idx % texts.length],
+                  dot: dots[idx % dots.length],
+                  nextLabel: getNextActionLabel(nextStatus),
+                  nextStatus: nextStatus
+                };
 
                 return (
                   <div 
@@ -596,15 +763,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                         </div>
                       ) : (
                         dayOrders.map(order => {
-                          const statusConfig = {
-                            PENDENTE: 'bg-amber-50 text-amber-700 border-amber-100',
-                            APROVADO: 'bg-indigo-50 text-indigo-700 border-indigo-100',
-                            PREPARACAO: 'bg-purple-50 text-purple-700 border-purple-100',
-                            A_CAMINHO: 'bg-sky-50 text-sky-700 border-sky-100',
-                            ENTREGUE: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-                            CANCELADO: 'bg-red-50 text-red-700 border-red-100'
-                          }[order.status];
-
+                          const statusConfig = getStatusBadgeClass(order.status);
                           const orderTime = order.scheduledAt ? order.scheduledAt.split('T')[1]?.substring(0, 5) || '' : '';
 
                           return (
@@ -630,12 +789,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                               <div className="flex items-center justify-between border-t border-slate-50 pt-1.5">
                                 <span className="font-black text-[10px] text-slate-800">{formatBRL(order.totalAmount)}</span>
                                 <span className={`px-1.5 py-0.5 rounded-full border text-[8px] font-bold uppercase scale-90 ${statusConfig}`}>
-                                  {order.status === 'PENDENTE' && 'Pend.'}
-                                  {order.status === 'APROVADO' && 'Aprov.'}
-                                  {order.status === 'PREPARACAO' && 'Prep.'}
-                                  {order.status === 'A_CAMINHO' && 'Env.'}
-                                  {order.status === 'ENTREGUE' && 'Entr.'}
-                                  {order.status === 'CANCELADO' && 'Canc.'}
+                                  {formatStatusLabel(order.status).substring(0, 5)}
                                 </span>
                               </div>
                             </div>
@@ -684,13 +838,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   <span className="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
                     <CheckCircle className="w-3.5 h-3.5" /> Status Atual
                   </span>
-                  <p className="text-xs font-extrabold text-slate-755 uppercase">
-                    {selectedOrder.status === 'PENDENTE' && <span className="text-amber-600">Pendente</span>}
-                    {selectedOrder.status === 'APROVADO' && <span className="text-indigo-650">Aprovado</span>}
-                    {selectedOrder.status === 'PREPARACAO' && <span className="text-purple-600">Em Preparação</span>}
-                    {selectedOrder.status === 'A_CAMINHO' && <span className="text-sky-655">A Caminho</span>}
-                    {selectedOrder.status === 'ENTREGUE' && <span className="text-emerald-650">Entregue</span>}
-                    {selectedOrder.status === 'CANCELADO' && <span className="text-red-650">Cancelado</span>}
+                  <p className="text-xs font-extrabold text-slate-700 uppercase">
+                    <span className={getStatusBadgeClass(selectedOrder.status) + " px-2 py-0.5 rounded text-[10px]"}>
+                      {formatStatusLabel(selectedOrder.status)}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -715,13 +866,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               {/* TIMELINE VISUAL STEPPER */}
               {(() => {
-                const steps = [
-                  { key: 'PENDENTE', label: 'Pendente' },
-                  { key: 'APROVADO', label: 'Aprovado' },
-                  { key: 'PREPARACAO', label: 'Preparação' },
-                  { key: 'A_CAMINHO', label: 'A Caminho' },
-                  { key: 'ENTREGUE', label: 'Entregue' }
-                ];
+                const steps = statusFlow.map(s => ({
+                  key: s,
+                  label: formatStatusLabel(s)
+                }));
                 const currentStepIdx = steps.findIndex(s => s.key === selectedOrder.status);
 
                 return selectedOrder.status !== 'CANCELADO' ? (
@@ -762,14 +910,14 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center font-extrabold text-sm flex-shrink-0">✕</div>
                     <div>
                       <h5 className="font-extrabold text-xs">Pedido Cancelado</h5>
-                      <p className="text-[10px] text-red-600 mt-0.5">Este pedido foi cancelado e não pode seguir o fluxo operacional.</p>
+                      <p className="text-[10px] text-red-650 mt-0.5">Este pedido foi cancelado e não pode seguir o fluxo operacional.</p>
                     </div>
                   </div>
                 );
               })()}
 
               {/* STATUS OPERATION ACTIONS */}
-              {selectedOrder.status !== 'CANCELADO' && selectedOrder.status !== 'ENTREGUE' && (
+              {selectedOrder.status !== 'CANCELADO' && selectedOrder.status !== statusFlow[statusFlow.length - 1] && (
                 <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
                   <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Ações de Operação (Esteira)</span>
                   
@@ -777,13 +925,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     {/* Primary transition button */}
                     <button
                       onClick={() => {
-                        const statusProgression: { [key: string]: Order['status'] } = {
-                          PENDENTE: 'APROVADO',
-                          APROVADO: 'PREPARACAO',
-                          PREPARACAO: 'A_CAMINHO',
-                          A_CAMINHO: 'ENTREGUE'
-                        };
-                        const nextStatus = statusProgression[selectedOrder.status];
+                        const currentIdx = statusFlow.indexOf(selectedOrder.status);
+                        const nextStatus = (currentIdx >= 0 && currentIdx < statusFlow.length - 1) 
+                          ? statusFlow[currentIdx + 1] 
+                          : null;
                         if (nextStatus) {
                           onUpdateOrderStatus(selectedOrder.id, nextStatus);
                           setSelectedOrder(prev => prev ? { ...prev, status: nextStatus } : null);
@@ -791,10 +936,13 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                       }}
                       className="flex-grow bg-pix hover:bg-pix-dark text-white font-extrabold py-2 px-3 rounded-xl text-xs shadow-sm transition-all active:scale-98 flex items-center justify-center gap-1"
                     >
-                      {selectedOrder.status === 'PENDENTE' && 'Aprovar Pedido'}
-                      {selectedOrder.status === 'APROVADO' && 'Iniciar Preparação'}
-                      {selectedOrder.status === 'PREPARACAO' && 'Despachar / Enviar'}
-                      {selectedOrder.status === 'A_CAMINHO' && 'Confirmar Entrega'}
+                      {(() => {
+                        const currentIdx = statusFlow.indexOf(selectedOrder.status);
+                        const nextStatus = (currentIdx >= 0 && currentIdx < statusFlow.length - 1) 
+                          ? statusFlow[currentIdx + 1] 
+                          : '';
+                        return getNextActionLabel(nextStatus);
+                      })()}
                     </button>
 
                     {/* Direct selector */}
@@ -802,17 +950,15 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                       <select
                         value={selectedOrder.status}
                         onChange={(e) => {
-                          const newStatus = e.target.value as Order['status'];
+                          const newStatus = e.target.value;
                           onUpdateOrderStatus(selectedOrder.id, newStatus);
                           setSelectedOrder(prev => prev ? { ...prev, status: newStatus } : null);
                         }}
                         className="w-full text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-pix shadow-sm"
                       >
-                        <option value="PENDENTE">Pendente</option>
-                        <option value="APROVADO">Aprovado</option>
-                        <option value="PREPARACAO">Preparação</option>
-                        <option value="A_CAMINHO">A Caminho</option>
-                        <option value="ENTREGUE">Entregue</option>
+                        {statusFlow.map(status => (
+                          <option key={status} value={status}>{formatStatusLabel(status)}</option>
+                        ))}
                       </select>
                     </div>
 
@@ -830,6 +976,16 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                       Cancelar
                     </button>
                   </div>
+                  
+                  {activeBranch?.key === 'servicos' && selectedOrder.status !== 'DIVISAO_COMISSAO' && (
+                    <button
+                      onClick={() => setCheckoutOrder(selectedOrder)}
+                      className="w-full bg-gradient-to-r from-teal-500 to-emerald-400 hover:from-teal-600 hover:to-emerald-500 text-slate-950 font-black py-3 rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-teal-500/10 mt-3"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>Fazer Checkout / PDV (Comissão)</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -878,8 +1034,6 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   </div>
                 </div>
               </div>
-
-              {/* Linked Invoice / Financial Details Breakdown */}
               {linkedInvoice && linkedInvoice.installments && linkedInvoice.installments.length > 0 ? (
                 <div className="space-y-2.5">
                   <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Detalhamento Financeiro (Entrada/Parcelas)</h4>
@@ -921,7 +1075,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                                         onUpdateInstallmentStatus(linkedInvoice.id, inst.id, 'PAGO', 'PIX');
                                       }
                                     }}
-                                    className="bg-white hover:bg-slate-105 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 shadow-xs"
+                                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 shadow-xs"
                                   >
                                     Confirmar Pago
                                   </button>
@@ -946,11 +1100,169 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   </div>
                 )
               )}
+
+              {/* Dynamic commission repasse split panel */}
+              {selectedOrder.commission_split && (
+                <div className="space-y-2.5">
+                  <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Divisão de Repasse (Comissão)</h4>
+                  <div className="bg-slate-900 text-slate-100 rounded-2xl p-4 border border-slate-800 space-y-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-400">Taxa de Comissão Média:</span>
+                      <span className="font-bold text-teal-400">{selectedOrder.commission_split.rate}%</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-slate-800 text-xs">
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Profissional Repasse</span>
+                        <p className="font-black text-sm text-emerald-400">{formatBRL(selectedOrder.commission_split.professionalAmount)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Estabelecimento Líquido</span>
+                        <p className="font-black text-sm text-slate-200">{formatBRL(selectedOrder.commission_split.storeAmount)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {/* Checkout Service Commission Modal Overlay */}
+      {checkoutOrder && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in text-slate-100">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] animate-scale-in">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-teal-400" />
+                  <span>Faturamento & Checkout do Serviço</span>
+                </h3>
+                <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Pedido #{checkoutOrder.orderNumber} • {checkoutOrder.clientName}</p>
+              </div>
+              <button
+                onClick={() => setCheckoutOrder(null)}
+                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              
+              {/* Product adding selection */}
+              <div className="bg-slate-950/40 border border-slate-850 rounded-2xl p-4 space-y-3">
+                <span className="text-[9px] uppercase font-black text-slate-500 tracking-wider block">Adicionar Produtos ou Serviços Extra</span>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedExtraProductId}
+                    onChange={(e) => setSelectedExtraProductId(e.target.value)}
+                    className="flex-1 bg-slate-900 border border-slate-800 text-slate-250 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-teal-500 text-slate-100"
+                  >
+                    <option value="" className="text-slate-500">Selecione um item para adicionar...</option>
+                    {products?.map(p => (
+                      <option key={p.id} value={p.id} className="text-slate-100">{p.name} - {formatBRL(p.price)}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={addExtraProduct}
+                    disabled={!selectedExtraProductId}
+                    className="bg-teal-500 hover:bg-teal-600 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 font-bold px-4 py-2 rounded-xl text-xs uppercase tracking-wider active:scale-95 transition-all"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+
+              {/* Items List with commission inputs */}
+              <div className="space-y-3">
+                <span className="text-[9px] uppercase font-black text-slate-400 tracking-wider block">Itens Inclusos no Atendimento</span>
+                
+                <div className="space-y-3 max-h-[250px] overflow-y-auto pr-1">
+                  {checkoutItems.map((item, idx) => (
+                    <div key={idx} className="bg-slate-900/60 border border-slate-850 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-slide-up">
+                      <div className="space-y-1 flex-1 min-w-0">
+                        <p className="font-extrabold text-xs text-white truncate leading-snug">{item.name}</p>
+                        <p className="text-[10px] font-black text-teal-400">{formatBRL(item.price)}</p>
+                      </div>
+
+                      <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+                        {/* Qty controller */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => updateCheckoutItemQty(idx, -1)}
+                            className="p-1 bg-slate-950 hover:bg-slate-850 rounded text-slate-400"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-mono font-bold text-slate-200 min-w-[15px] text-center">{item.quantity}</span>
+                          <button
+                            onClick={() => updateCheckoutItemQty(idx, 1)}
+                            className="p-1 bg-slate-950 hover:bg-slate-850 rounded text-slate-400"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {/* Comm split controller */}
+                        <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-850">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase">Comissão:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={item.commission_rate}
+                            onChange={(e) => updateCheckoutItemRate(idx, parseFloat(e.target.value) || 0)}
+                            className="w-12 bg-transparent text-xs font-bold text-teal-400 font-mono text-center focus:outline-none"
+                          />
+                          <span className="text-xs font-bold text-slate-500">%</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Split calculation panel */}
+              <div className="bg-slate-950 rounded-3xl p-5 border border-slate-850 grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+                <div className="space-y-1">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block">Faturamento Total</span>
+                  <p className="text-lg font-black text-white">{formatBRL(checkoutTotal)}</p>
+                </div>
+                <div className="space-y-1 border-t sm:border-t-0 sm:border-x border-slate-850 py-2 sm:py-0">
+                  <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wide block">Repasse Profissional</span>
+                  <p className="text-lg font-black text-emerald-400">{formatBRL(professionalTotal)}</p>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[9px] font-bold text-teal-500 uppercase tracking-wide block">Estabelecimento Líquido</span>
+                  <p className="text-lg font-black text-teal-400">{formatBRL(storeTotal)}</p>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer actions */}
+            <div className="p-5 border-t border-slate-850 bg-slate-900/60 flex justify-end gap-3 flex-shrink-0">
+              <button
+                onClick={() => setCheckoutOrder(null)}
+                className="px-5 py-2.5 bg-slate-850 hover:bg-slate-800 text-slate-350 font-bold rounded-xl text-xs uppercase tracking-wider transition-all"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={handleConfirmCheckout}
+                disabled={isProcessingCheckout || checkoutItems.length === 0}
+                className="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-400 hover:from-teal-600 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition-all disabled:opacity-55 active:scale-95 shadow-md shadow-teal-500/10"
+              >
+                {isProcessingCheckout ? 'Finalizando...' : 'Confirmar & Checkout'}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 };

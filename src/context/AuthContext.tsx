@@ -12,6 +12,7 @@ export interface Profile {
   legal_name?: string;
   document?: string;
   phone?: string;
+  ramo_empresa?: string;
   created_at: string;
   updated_at: string;
 }

@@ -457,6 +457,8 @@ export interface ProductService {
   price: number;
   description: string;
   image?: string;
+  stock_quantity?: number;
+  commission_rate?: number;
 }
 
 export interface Installment {
@@ -677,11 +679,33 @@ export interface Order {
   clientDocument: string;
   items: OrderItem[];
   totalAmount: number;
-  status: 'PENDENTE' | 'APROVADO' | 'PREPARACAO' | 'A_CAMINHO' | 'ENTREGUE' | 'CANCELADO';
+  status: string; // Dynamic status determined by branch flow
   dateCreated: string;
   invoiceId?: string; // Links to invoice
   scheduledAt?: string; // ISO datetime string for scheduled appointment
   scheduleSlotId?: string; // Reference to the schedule_slots row
+  commission_split?: {
+    professionalAmount: number;
+    storeAmount: number;
+    rate: number;
+  } | null;
+}
+
+export interface BusinessBranch {
+  id: string;
+  key: string;
+  name: string;
+  initial_trigger: string;
+  focus: string;
+  order_status_flow: string[];
+  config: {
+    hide_agenda?: boolean;
+    hide_kitchen?: boolean;
+    hide_delivery?: boolean;
+    main_screen?: 'pdv' | 'schedule' | 'orders';
+  };
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ==========================================

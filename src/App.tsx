@@ -18,7 +18,8 @@ import {
   Wallet as WalletIcon,
   LogOut,
   CalendarClock,
-  Globe
+  Globe,
+  Barcode
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -48,6 +49,7 @@ import { PublicStorefront } from './pages/PublicStorefront';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { QuickPOS } from './components/QuickPOS';
 import { LandingPage } from './pages/LandingPage';
 import { supabase, isSupabaseConfigured } from './utils/supabaseClient';
 import { SupabaseSetupScreen } from './components/SupabaseSetupScreen';
@@ -135,13 +137,14 @@ function MandaPixApp() {
 
   const firstName = getFirstName();
 
+  const [activeBranch, setActiveBranch] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce' | 'cobranças'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce' | 'cobranças'>('orders');
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
@@ -208,6 +211,42 @@ function MandaPixApp() {
       setLoadingData(false);
     }
   };
+
+  const loadActiveBranch = async () => {
+    const ramo = profile?.ramo_empresa || 'varejo';
+    try {
+      const { data, error } = await supabase
+        .from('business_branches')
+        .select('*')
+        .eq('key', ramo)
+        .maybeSingle();
+      
+      if (!error && data) {
+        setActiveBranch(data);
+      } else {
+        const fallbacks: Record<string, any> = {
+          varejo: { key: 'varejo', name: 'Varejo / Conveniência / Loja Física', order_status_flow: ['REGISTRO_ITENS', 'PAGAMENTO_PIX', 'VENDA_CONCLUIDA'], config: { hide_agenda: true, hide_kitchen: true, main_screen: 'pdv' } },
+          servicos: { key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', order_status_flow: ['AGENDAMENTO', 'CHECK_IN', 'CHECKOUT', 'PAGAMENTO', 'DIVISAO_COMISSAO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
+          alimentacao: { key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } }
+        };
+        setActiveBranch(fallbacks[ramo] || fallbacks.varejo);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar ramo ativo:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (profile) {
+      loadActiveBranch();
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (activeBranch?.config?.main_screen) {
+      setActiveSubTab(activeBranch.config.main_screen);
+    }
+  }, [activeBranch]);
 
   const loadScheduleData = async () => {
     if (!user) return;
@@ -1650,7 +1689,8 @@ function MandaPixApp() {
               onDeleteStore={handleDeleteStore}
               onSelectStore={(id) => {
                 setActiveStoreId(id);
-                setActiveSubTab('orders');
+                const defaultTab = activeBranch?.config?.main_screen || 'orders';
+                setActiveSubTab(defaultTab as any);
               }}
             />
           ) : (
@@ -1680,8 +1720,12 @@ function MandaPixApp() {
                       </div>
                       
                       <select
-                        value={activeStoreId}
-                        onChange={(e) => setActiveStoreId(e.target.value)}
+                        value={activeStoreId || ''}
+                        onChange={(e) => {
+                          setActiveStoreId(e.target.value);
+                          const defaultTab = activeBranch?.config?.main_screen || 'orders';
+                          setActiveSubTab(defaultTab as any);
+                        }}
                         className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none"
                       >
                         {stores.map(s => (
@@ -1692,6 +1736,7 @@ function MandaPixApp() {
 
                     <div className="flex px-5 bg-white overflow-x-auto">
                       {([
+                        { id: 'pdv', label: 'PDV Rápido', icon: Barcode },
                         { id: 'orders', label: 'Pedidos', icon: ShoppingCart },
                         { id: 'invoices', label: 'Gerenciar vendas', icon: History },
                         { id: 'clients', label: 'Clientes', icon: Users },
@@ -1699,7 +1744,14 @@ function MandaPixApp() {
                         { id: 'schedule', label: 'Agendamento', icon: CalendarClock },
                         { id: 'ecommerce', label: 'E-commerce', icon: Globe },
                         { id: 'cobranças', label: 'Cobranças', icon: DollarSign }
-                      ] as const).map(subTab => {
+                      ] as const)
+                        .filter(subTab => {
+                          if (!activeBranch) return true;
+                          if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
+                          if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
+                          return true;
+                        })
+                        .map(subTab => {
                         const Icon = subTab.icon;
                         const isSubActive = activeSubTab === subTab.id;
                         return (
@@ -1723,12 +1775,31 @@ function MandaPixApp() {
               })()}
 
               <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+                {activeSubTab === 'pdv' && (
+                  <QuickPOS
+                    storeId={activeStoreId!}
+                    products={products.filter(p => {
+                      const cat = catalogs.find(c => c.id === p.catalogId);
+                      return cat && cat.storeId === activeStoreId;
+                    })}
+                    clients={clients.filter(c => c.storeId === activeStoreId)}
+                    activeWallet={primaryKey}
+                    onOrderCreated={(newOrder) => {
+                      setOrders(prev => [newOrder, ...prev]);
+                    }}
+                    onRefreshProducts={() => {
+                      loadProducts();
+                    }}
+                  />
+                )}
+
                 {activeSubTab === 'orders' && (
                   <OrderManager
                     orders={orders.filter(o => o.storeId === activeStoreId)}
                     invoices={invoices.filter(inv => inv.storeId === activeStoreId)}
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
+                    activeBranch={activeBranch}
                   />
                 )}
 

@@ -661,6 +661,31 @@ ON CONFLICT (key) DO UPDATE SET
   order_status_flow = EXCLUDED.order_status_flow,
   config = EXCLUDED.config;
 
+-- 12. Tabela de Funcionários (employees)
+CREATE TABLE IF NOT EXISTS public.employees (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'VENDEDOR', -- 'GERENTE', 'VENDEDOR', 'ATENDENTE'
+  access_code TEXT NOT NULL, -- PIN ou Código de Acesso
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants gerenciam seus funcionários"
+  ON public.employees FOR ALL
+  USING (auth.uid() = tenant_id);
+
+CREATE POLICY "Leitura pública de funcionários para login"
+  ON public.employees FOR SELECT
+  USING (true);
+
 
 
 

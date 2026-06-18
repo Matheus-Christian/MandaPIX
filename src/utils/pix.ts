@@ -442,6 +442,16 @@ export interface Client {
   phone: string;
 }
 
+export interface Employee {
+  id: string;
+  storeId?: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: 'GERENTE' | 'VENDEDOR' | 'ATENDENTE';
+  accessCode: string;
+}
+
 export interface Catalog {
   id: string;
   storeId?: string;
@@ -498,6 +508,11 @@ export const DEFAULT_CLIENTS: Client[] = [
   { id: 'cli-2', storeId: 'store-1', name: 'TechSolutions Ltda', document: '12.345.678/0001-90', email: 'financeiro@techsolutions.com', phone: '(11) 98765-4321' },
   { id: 'cli-3', storeId: 'store-1', name: 'Marcos Oliveira de Souza', document: '789.012.345-67', email: 'marcos.souza@yahoo.com', phone: '(31) 98877-6655' },
   { id: 'cli-4', storeId: 'store-2', name: 'Clara Vasconcelos', document: '321.654.987-00', email: 'clara.v@gmail.com', phone: '(11) 97766-5544' }
+];
+
+export const DEFAULT_EMPLOYEES: Employee[] = [
+  { id: 'emp-1', storeId: 'store-1', name: 'Carlos Gerente', email: 'carlos@loja.com', phone: '(11) 99999-1111', role: 'GERENTE', accessCode: '1234' },
+  { id: 'emp-2', storeId: 'store-1', name: 'Maria Vendedora', email: 'maria@loja.com', phone: '(11) 99999-2222', role: 'VENDEDOR', accessCode: '5678' }
 ];
 
 export const DEFAULT_CATALOGS: Catalog[] = [

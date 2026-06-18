@@ -1,9 +1,25 @@
 import React, { useState } from 'react';
-import { Users, Search, Plus, Trash2, X, Edit } from 'lucide-react';
-import type { Client } from '../utils/pix';
+import { 
+  Users, 
+  Search, 
+  Plus, 
+  Trash2, 
+  X, 
+  Edit, 
+  Eye, 
+  Mail, 
+  Phone, 
+  FileText, 
+  ShoppingBag, 
+  Calendar, 
+  Clock 
+} from 'lucide-react';
+import { formatBRL } from '../utils/pix';
+import type { Client, Order } from '../utils/pix';
 
 interface ClientManagerProps {
   clients: Client[];
+  orders: Order[];
   onAddClient: (client: Omit<Client, 'id'>) => void;
   onEditClient: (client: Client) => void;
   onDeleteClient: (id: string) => void;
@@ -11,6 +27,7 @@ interface ClientManagerProps {
 
 export const ClientManager: React.FC<ClientManagerProps> = ({
   clients,
+  orders,
   onAddClient,
   onEditClient,
   onDeleteClient,
@@ -18,6 +35,8 @@ export const ClientManager: React.FC<ClientManagerProps> = ({
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [viewingClient, setViewingClient] = useState<Client | null>(null);
+  const [activeModalTab, setActiveModalTab] = useState<'pedidos' | 'agendamentos'>('pedidos');
 
   // Form State
   const [name, setName] = useState('');
@@ -296,6 +315,13 @@ export const ClientManager: React.FC<ClientManagerProps> = ({
                           </td>
                           <td className="p-4 text-right pr-6 space-x-1.5 flex items-center justify-end">
                             <button
+                              onClick={() => { setViewingClient(client); setActiveModalTab('pedidos'); }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-pix hover:bg-pix-light border border-transparent hover:border-pix/10 transition-all active:scale-90"
+                              title="Visualizar Informações"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => startEditClient(client)}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-pix hover:bg-pix-light border border-transparent hover:border-pix/10 transition-all active:scale-90"
                               title="Editar Cliente"
@@ -320,6 +346,209 @@ export const ClientManager: React.FC<ClientManagerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Modal de Detalhes do Cliente */}
+      {viewingClient && (() => {
+        // Find client orders and appointments
+        const clientOrders = orders.filter(o => 
+          o.clientDocument === viewingClient.document || 
+          (viewingClient.email && o.clientEmail === viewingClient.email) ||
+          (viewingClient.phone && o.clientPhone === viewingClient.phone)
+        );
+
+        // A normal order has no scheduledAt. A scheduled order has scheduledAt
+        const normalOrders = clientOrders.filter(o => !o.scheduledAt);
+        const appointments = clientOrders.filter(o => !!o.scheduledAt);
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-slate-100 shadow-2xl animate-scale-up">
+              {/* Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-pix" />
+                  <h3 className="font-bold text-slate-800 text-lg">Informações do Cliente</h3>
+                </div>
+                <button
+                  onClick={() => setViewingClient(null)}
+                  className="text-slate-400 hover:text-slate-650 p-1.5 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                
+                {/* Profile Card */}
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col md:flex-row md:items-center gap-4">
+                  <div className="w-16 h-16 rounded-full bg-pix/10 text-pix flex items-center justify-center font-black text-xl uppercase shrink-0">
+                    {viewingClient.name.substring(0, 2)}
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-lg font-bold text-slate-800">{viewingClient.name}</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-500 font-semibold mt-2">
+                      <div className="flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-slate-450" />
+                        <span>{viewingClient.document}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="w-4 h-4 text-slate-450" />
+                        <span>{viewingClient.email || '-'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Phone className="w-4 h-4 text-slate-450" />
+                        <span>{viewingClient.phone || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="border-b border-slate-100 flex gap-4">
+                  <button
+                    onClick={() => setActiveModalTab('pedidos')}
+                    className={`pb-2 border-b-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      activeModalTab === 'pedidos' 
+                        ? 'border-pix text-pix' 
+                        : 'border-transparent text-slate-400 hover:text-slate-500'
+                    }`}
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Histórico de Pedidos ({normalOrders.length})</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveModalTab('agendamentos')}
+                    className={`pb-2 border-b-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      activeModalTab === 'agendamentos' 
+                        ? 'border-pix text-pix' 
+                        : 'border-transparent text-slate-400 hover:text-slate-500'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4" />
+                    <span>Agendamentos ({appointments.length})</span>
+                  </button>
+                </div>
+
+                {/* Tab Content */}
+                <div>
+                  {activeModalTab === 'pedidos' && (
+                    <div className="space-y-3">
+                      {normalOrders.length === 0 ? (
+                        <div className="text-center py-10 bg-slate-50/50 border border-dashed border-slate-200 rounded-2xl text-slate-455 text-xs">
+                          Nenhum pedido registrado para este cliente.
+                        </div>
+                      ) : (
+                        normalOrders.map(order => (
+                          <div 
+                            key={order.id}
+                            className="p-4 border border-slate-100 bg-slate-50/40 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-slate-805">Pedido #{order.orderNumber}</span>
+                                <span className="text-[10px] text-slate-400 font-bold">
+                                  {new Date(order.dateCreated + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                </span>
+                              </div>
+                              <div className="text-slate-500 font-medium max-w-md">
+                                {order.items.map(item => `${item.quantity}x ${item.name}`).join(', ')}
+                              </div>
+                            </div>
+                            <div className="flex sm:flex-col items-start sm:items-end justify-between sm:justify-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">
+                                {formatBRL(order.totalAmount)}
+                              </span>
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                                order.status === 'APROVADO' || order.status === 'VENDA_CONCLUIDA' || order.status === 'PEDIDO_ENTREGUE'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                  : order.status === 'PENDENTE' || order.status === 'REGISTRO_ITENS' || order.status === 'ENTRADA_PEDIDO'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                                  : 'bg-slate-50 text-slate-650 border border-slate-150'
+                              }`}>
+                                {order.status.replace('_', ' ')}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {activeModalTab === 'agendamentos' && (
+                    <div className="space-y-3">
+                      {appointments.length === 0 ? (
+                        <div className="text-center py-10 bg-slate-50/50 border border-dashed border-slate-200 rounded-2xl text-slate-455 text-xs">
+                          Nenhum agendamento ativo ou histórico registrado.
+                        </div>
+                      ) : (
+                        appointments.map(app => {
+                          const dateObj = new Date(app.scheduledAt || '');
+                          const isValidDate = !isNaN(dateObj.getTime());
+                          const dateFormatted = isValidDate 
+                            ? dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+                            : '';
+                          const timeFormatted = isValidDate
+                            ? dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                            : '';
+
+                          return (
+                            <div 
+                              key={app.id}
+                              className="p-4 border border-slate-100 bg-slate-50/40 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1 text-pix font-black">
+                                    <Clock className="w-3.5 h-3.5" />
+                                    <span>{dateFormatted} às {timeFormatted}</span>
+                                  </div>
+                                </div>
+                                <div className="text-slate-600 font-semibold">
+                                  {app.items.map(item => `${item.quantity}x ${item.name}`).join(', ')}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-medium">
+                                  Pedido #{app.orderNumber} • Criado em {new Date(app.dateCreated + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                </div>
+                              </div>
+                              <div className="flex sm:flex-col items-start sm:items-end justify-between sm:justify-center gap-2">
+                                <span className="font-extrabold text-slate-800">
+                                  {formatBRL(app.totalAmount)}
+                                </span>
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                                  app.status === 'APROVADO' || app.status === 'VENDA_CONCLUIDA' || app.status === 'PEDIDO_ENTREGUE'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                    : app.status === 'PENDENTE' || app.status === 'REGISTRO_ITENS' || app.status === 'ENTRADA_PEDIDO'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                                    : 'bg-slate-50 text-slate-650 border border-slate-150'
+                                }`}>
+                                  {app.status.replace('_', ' ')}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Footer */}
+              <div className="p-6 border-t border-slate-100 flex justify-end">
+                <button
+                  onClick={() => setViewingClient(null)}
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-sm"
+                >
+                  Fechar
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -19,7 +19,8 @@ import {
   LogOut,
   CalendarClock,
   Globe,
-  Barcode
+  Barcode,
+  UserCheck
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -32,7 +33,8 @@ import {
 import { 
   formatBRL
 } from './utils/pix';
-import type { SavedPixKey, Client, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar, EcommerceSettings } from './utils/pix';
+import type { SavedPixKey, Client, Employee, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar, EcommerceSettings } from './utils/pix';
+import { DEFAULT_EMPLOYEES } from './utils/pix';
 
 import { VirtualCard } from './components/VirtualCard';
 import { ClientManager } from './components/ClientManager';
@@ -44,6 +46,7 @@ import { OrderManager } from './components/OrderManager';
 import { EcommerceManager } from './components/EcommerceManager';
 import { ScheduleManager } from './components/ScheduleManager';
 import { BillingSettingsManager } from './components/BillingSettingsManager';
+import { EmployeeManager } from './components/EmployeeManager';
 import { PublicStorefront } from './pages/PublicStorefront';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -144,7 +147,7 @@ function MandaPixApp() {
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'ecommerce' | 'cobranças'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'employees' | 'ecommerce' | 'cobranças'>('orders');
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
@@ -152,6 +155,12 @@ function MandaPixApp() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [selectedEmployeeIdForPin, setSelectedEmployeeIdForPin] = useState('');
+  const [pinInput, setPinInput] = useState('');
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [products, setProducts] = useState<ProductService[]>([]);
   const [savedKeys, setSavedKeys] = useState<SavedPixKey[]>([]);
@@ -197,6 +206,7 @@ function MandaPixApp() {
       await Promise.all([
         loadStores(),
         loadClients(),
+        loadEmployees(),
         loadCatalogs(),
         loadProducts(),
         loadWallets(),
@@ -340,6 +350,37 @@ function MandaPixApp() {
       email: d.email,
       phone: d.phone
     })));
+  };
+
+  const loadEmployees = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('tenant_id', user.id)
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setEmployees((data || []).map((d: any) => ({
+        id: d.id,
+        storeId: d.store_id,
+        name: d.name,
+        email: d.email,
+        phone: d.phone,
+        role: d.role as any,
+        accessCode: d.access_code
+      })));
+    } catch (err) {
+      console.warn('Erro ao carregar funcionários do Supabase. Usando dados locais:', err);
+      const local = localStorage.getItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`);
+      if (local) {
+        setEmployees(JSON.parse(local));
+      } else {
+        const withStoreIds = DEFAULT_EMPLOYEES.map(emp => ({ ...emp, storeId: activeStoreId || 'store-1' }));
+        setEmployees(withStoreIds);
+        localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(withStoreIds));
+      }
+    }
   };
 
   const loadCatalogs = async () => {
@@ -713,6 +754,74 @@ function MandaPixApp() {
       await loadClients();
     } catch (err) {
       console.error('Erro ao deletar cliente:', err);
+    }
+  };
+
+  // Callbacks para Funcionários
+  const handleAddEmployee = async (newEmpData: Omit<Employee, 'id'>) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from('employees')
+        .insert([{
+          store_id: newEmpData.storeId,
+          name: newEmpData.name,
+          email: newEmpData.email,
+          phone: newEmpData.phone,
+          role: newEmpData.role,
+          access_code: newEmpData.accessCode
+        }]);
+      if (error) throw error;
+      await loadEmployees();
+    } catch (err) {
+      console.warn('Erro ao salvar no Supabase, salvando localmente:', err);
+      const newEmp: Employee = {
+        id: 'emp-' + Math.random().toString(36).substring(2, 9),
+        ...newEmpData
+      };
+      const updated = [newEmp, ...employees];
+      setEmployees(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleEditEmployee = async (updatedEmp: Employee) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from('employees')
+        .update({
+          name: updatedEmp.name,
+          email: updatedEmp.email,
+          phone: updatedEmp.phone,
+          role: updatedEmp.role,
+          access_code: updatedEmp.accessCode
+        })
+        .eq('id', updatedEmp.id);
+      if (error) throw error;
+      await loadEmployees();
+    } catch (err) {
+      console.warn('Erro ao editar no Supabase, atualizando localmente:', err);
+      const updated = employees.map(e => e.id === updatedEmp.id ? updatedEmp : e);
+      setEmployees(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleDeleteEmployee = async (id: string) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from('employees')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadEmployees();
+    } catch (err) {
+      console.warn('Erro ao excluir no Supabase, atualizando localmente:', err);
+      const updated = employees.filter(e => e.id !== id);
+      setEmployees(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
     }
   };
 
@@ -1124,6 +1233,10 @@ function MandaPixApp() {
     { id: 'wallets', label: 'Carteiras', icon: WalletIcon }
   ] as const;
 
+  const visibleMenuItems = activeEmployee 
+    ? menuItems.filter(item => item.id === 'stores')
+    : menuItems;
+
   if (loadingData) {
     return (
       <div className="min-h-screen bg-slate-905 text-slate-100 flex items-center justify-center">
@@ -1155,28 +1268,74 @@ function MandaPixApp() {
         </div>
 
         {/* Logged in User Profile Info (Desktop) */}
-        <div className="px-6 py-4 border-b border-slate-800/40 flex items-center justify-between gap-3 bg-slate-900/20">
-          <div className="flex items-center gap-3 truncate">
-            <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
-              {firstName.charAt(0)}
+        <div className="px-6 py-4 border-b border-slate-800/40 flex flex-col gap-2 bg-slate-900/20">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 truncate">
+              {activeEmployee ? (
+                <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                  {activeEmployee.name.charAt(0)}
+                </div>
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                  {firstName.charAt(0)}
+                </div>
+              )}
+              <div className="truncate">
+                {activeEmployee ? (
+                  <>
+                    <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">{activeEmployee.role}</p>
+                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{activeEmployee.name}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
+                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="truncate">
-              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
-              <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
-            </div>
+            {activeEmployee ? (
+              <button
+                onClick={() => {
+                  if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
+                    setActiveEmployee(null);
+                  }
+                }}
+                className="p-2 bg-amber-500/10 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-amber-500 transition-all active:scale-95 flex-shrink-0"
+                title="Sair do Perfil de Funcionário"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={handleLogout}
+                className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0 animate-fade-in"
+                title="Sair da Conta"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
-          <button
-            onClick={handleLogout}
-            className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0 animate-fade-in"
-            title="Sair da Conta"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          
+          {/* Button to enter employee mode - only shown when in a store and NOT already in employee mode */}
+          {activeStoreId && !activeEmployee && (
+            <button
+              onClick={() => {
+                setPinInput('');
+                setPinError('');
+                setSelectedEmployeeIdForPin('');
+                setIsPinModalOpen(true);
+              }}
+              className="mt-1 flex items-center justify-center gap-1.5 w-full bg-slate-800/80 hover:bg-pix text-white py-1.5 rounded-lg text-[10px] font-bold tracking-wide transition-all border border-slate-700/50 hover:border-transparent active:scale-95 animate-fade-in"
+            >
+              <Users className="w-3.5 h-3.5" /> Entrar como Funcionário
+            </button>
+          )}
         </div>
 
         {/* Navigation Menu */}
         <nav className="flex-1 px-4 py-6 space-y-1">
-          {menuItems.map(item => {
+          {visibleMenuItems.map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -1250,26 +1409,73 @@ function MandaPixApp() {
               </div>
 
               {/* Logged in User Profile Info (Mobile) */}
-              <div className="flex items-center justify-between gap-3 bg-slate-900/40 p-3 rounded-2xl border border-slate-800/60">
-                <div className="flex items-center gap-3 truncate">
-                  <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
-                    {firstName.charAt(0)}
+              <div className="flex flex-col gap-2 bg-slate-900/40 p-3 rounded-2xl border border-slate-800/60">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 truncate">
+                    {activeEmployee ? (
+                      <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                        {activeEmployee.name.charAt(0)}
+                      </div>
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                        {firstName.charAt(0)}
+                      </div>
+                    )}
+                    <div className="truncate">
+                      {activeEmployee ? (
+                        <>
+                          <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">{activeEmployee.role}</p>
+                          <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{activeEmployee.name}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
+                          <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="truncate">
-                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
-                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
-                  </div>
+                  {activeEmployee ? (
+                    <button
+                      onClick={() => {
+                        if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
+                          setActiveEmployee(null);
+                        }
+                      }}
+                      className="p-2 bg-amber-500/10 hover:bg-rose-500/20 hover:text-rose-455 rounded-xl text-amber-500 transition-all active:scale-95 flex-shrink-0"
+                      title="Sair do Perfil de Funcionário"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleLogout}
+                      className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0"
+                      title="Sair da Conta"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0"
-                  title="Sair da Conta"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+                
+                {/* Button to enter employee mode (Mobile) - only shown when in a store and NOT already in employee mode */}
+                {activeStoreId && !activeEmployee && (
+                  <button
+                    onClick={() => {
+                      setPinInput('');
+                      setPinError('');
+                      setSelectedEmployeeIdForPin('');
+                      setIsPinModalOpen(true);
+                      setIsSidebarOpen(false); // close sidebar to show overlay
+                    }}
+                    className="mt-1 flex items-center justify-center gap-1.5 w-full bg-slate-800 hover:bg-pix text-white py-2 rounded-xl text-[10px] font-bold tracking-wide transition-all border border-slate-700 hover:border-transparent active:scale-95"
+                  >
+                    <Users className="w-3.5 h-3.5" /> Entrar como Funcionário
+                  </button>
+                )}
               </div>
               <nav className="space-y-1">
-                {menuItems.map(item => {
+                {visibleMenuItems.map(item => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
                   return (
@@ -1703,13 +1909,15 @@ function MandaPixApp() {
                   <div className="bg-white border-b border-slate-100 flex-shrink-0 flex flex-col">
                     <div className="p-5 flex items-center justify-between border-b border-slate-50">
                       <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => setActiveStoreId(null)}
-                          className="p-1.5 text-slate-500 hover:text-slate-700 rounded-xl hover:bg-slate-100 border border-slate-100 transition-all active:scale-95"
-                          title="Voltar para Lojas"
-                        >
-                          <ArrowLeft className="w-5 h-5" />
-                        </button>
+                        {!activeEmployee && (
+                          <button
+                            onClick={() => setActiveStoreId(null)}
+                            className="p-1.5 text-slate-500 hover:text-slate-700 rounded-xl hover:bg-slate-100 border border-slate-100 transition-all active:scale-95"
+                            title="Voltar para Lojas"
+                          >
+                            <ArrowLeft className="w-5 h-5" />
+                          </button>
+                        )}
                         <div>
                           <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold font-mono">Loja Ativa</span>
                           <h2 className="text-xl font-black text-slate-800 flex items-center gap-2 mt-0.5">
@@ -1721,12 +1929,15 @@ function MandaPixApp() {
                       
                       <select
                         value={activeStoreId || ''}
+                        disabled={!!activeEmployee}
                         onChange={(e) => {
                           setActiveStoreId(e.target.value);
                           const defaultTab = activeBranch?.config?.main_screen || 'orders';
                           setActiveSubTab(defaultTab as any);
                         }}
-                        className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none"
+                        className={`text-xs font-bold text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none ${
+                          activeEmployee ? 'bg-slate-100 cursor-not-allowed opacity-70' : 'bg-slate-50'
+                        }`}
                       >
                         {stores.map(s => (
                           <option key={s.id} value={s.id}>{s.name}</option>
@@ -1742,10 +1953,20 @@ function MandaPixApp() {
                         { id: 'clients', label: 'Clientes', icon: Users },
                         { id: 'catalogs', label: 'Catálogos', icon: FolderOpen },
                         { id: 'schedule', label: 'Agendamento', icon: CalendarClock },
+                        { id: 'employees', label: 'Funcionários', icon: UserCheck },
                         { id: 'ecommerce', label: 'E-commerce', icon: Globe },
                         { id: 'cobranças', label: 'Cobranças', icon: DollarSign }
                       ] as const)
                         .filter(subTab => {
+                          if (activeEmployee) {
+                            if (activeEmployee.role === 'GERENTE') {
+                              if (subTab.id === 'ecommerce' || subTab.id === 'cobranças') return false;
+                            } else if (activeEmployee.role === 'VENDEDOR') {
+                              if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
+                            } else if (activeEmployee.role === 'ATENDENTE') {
+                              if (!['orders', 'schedule'].includes(subTab.id)) return false;
+                            }
+                          }
                           if (!activeBranch) return true;
                           if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
                           if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
@@ -1827,6 +2048,7 @@ function MandaPixApp() {
                 {activeSubTab === 'clients' && (
                   <ClientManager
                     clients={clients.filter(c => c.storeId === activeStoreId)}
+                    orders={orders.filter(o => o.storeId === activeStoreId)}
                     onAddClient={(client) => handleAddClient({ ...client, storeId: activeStoreId! })}
                     onEditClient={handleEditClient}
                     onDeleteClient={handleDeleteClient}
@@ -1887,6 +2109,15 @@ function MandaPixApp() {
                     }}
                   />
                 )}
+
+                {activeSubTab === 'employees' && (
+                  <EmployeeManager
+                    employees={employees.filter(e => e.storeId === activeStoreId)}
+                    onAddEmployee={(emp) => handleAddEmployee({ ...emp, storeId: activeStoreId! })}
+                    onEditEmployee={handleEditEmployee}
+                    onDeleteEmployee={handleDeleteEmployee}
+                  />
+                )}
               </div>
             </div>
           )
@@ -1901,7 +2132,7 @@ function MandaPixApp() {
 
       {/* MOBILE TAB MENU */}
       <div className="md:hidden bg-white border-t border-slate-100 py-2.5 px-3 flex justify-between select-none flex-shrink-0 z-20 shadow-md">
-        {menuItems.map(item => {
+        {visibleMenuItems.map(item => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
@@ -1918,6 +2149,129 @@ function MandaPixApp() {
           );
         })}
       </div>
+
+      {/* PIN Lock / Employee Login Modal */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl relative space-y-6 text-white text-center" style={{ backgroundColor: '#0f172a' }}>
+            
+            {/* Lock Icon and Header */}
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center shadow-inner">
+                <Users className="w-6 h-6 animate-pulse" />
+              </div>
+              <h3 className="font-extrabold text-lg text-slate-100 tracking-tight">Acesso de Funcionário</h3>
+              <p className="text-xs text-slate-400">Selecione seu perfil e digite seu código de acesso</p>
+            </div>
+
+            {/* Form */}
+            <div className="space-y-4 text-left">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Funcionário</label>
+                <select
+                  value={selectedEmployeeIdForPin}
+                  onChange={(e) => {
+                    setSelectedEmployeeIdForPin(e.target.value);
+                    setPinError('');
+                  }}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-800 rounded-xl bg-slate-800 text-slate-100 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:border-transparent transition-all font-semibold"
+                >
+                  <option value="" disabled>Selecione um perfil...</option>
+                  {employees
+                    .filter(e => e.storeId === activeStoreId)
+                    .map(emp => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.role === 'GERENTE' ? 'Gerente' : emp.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'})
+                      </option>
+                    ))}
+                </select>
+                {employees.filter(e => e.storeId === activeStoreId).length === 0 && (
+                  <p className="text-[10px] text-amber-450 mt-1 font-semibold">
+                    * Nenhum funcionário cadastrado nesta loja. Cadastre-os na aba de Funcionários.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Código PIN</label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  placeholder="••••"
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(e.target.value.replace(/\D/g, ''));
+                    setPinError('');
+                  }}
+                  className="w-full text-center tracking-widest text-lg font-mono py-2.5 border border-slate-800 rounded-xl bg-slate-800 text-slate-100 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:border-transparent transition-all"
+                />
+              </div>
+
+              {pinError && (
+                <p className="text-red-500 text-xs font-semibold text-center animate-shake">
+                  {pinError}
+                </p>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const emp = employees.find(e => e.id === selectedEmployeeIdForPin);
+                  if (!emp) {
+                    setPinError('Selecione um funcionário.');
+                    return;
+                  }
+                  if (!pinInput) {
+                    setPinError('Digite o código PIN.');
+                    return;
+                  }
+                  if (emp.accessCode === pinInput) {
+                    setActiveEmployee(emp);
+                    setIsPinModalOpen(false);
+                    setPinInput('');
+                    setPinError('');
+                    setSelectedEmployeeIdForPin('');
+                    
+                    // Adjust active tab if current is forbidden
+                    let allowed = true;
+                    if (emp.role === 'GERENTE') {
+                      if (activeSubTab === 'ecommerce' || activeSubTab === 'cobranças') allowed = false;
+                    } else if (emp.role === 'VENDEDOR') {
+                      if (!['pdv', 'orders', 'schedule'].includes(activeSubTab)) allowed = false;
+                    } else if (emp.role === 'ATENDENTE') {
+                      if (!['orders', 'schedule'].includes(activeSubTab)) allowed = false;
+                    }
+                    if (!allowed) {
+                      setActiveSubTab('orders');
+                    }
+                  } else {
+                    setPinError('Código PIN incorreto!');
+                  }
+                }}
+                className="w-full bg-pix hover:bg-pix-dark text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-pix/10 active:scale-98"
+              >
+                Confirmar Acesso
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPinModalOpen(false);
+                  setPinInput('');
+                  setPinError('');
+                  setSelectedEmployeeIdForPin('');
+                }}
+                className="w-full bg-transparent hover:bg-slate-800 text-slate-400 hover:text-slate-200 py-2.5 rounded-xl text-xs font-bold transition-all"
+              >
+                Cancelar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

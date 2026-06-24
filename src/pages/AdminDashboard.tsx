@@ -335,7 +335,7 @@ export const AdminDashboard: React.FC = () => {
         console.warn('Erro ao carregar ramos de atuação, usando padrões estáticos:', branchesErr);
         setBranches([
           { id: 'b-varejo', key: 'varejo', name: 'Varejo / Conveniência / Loja Física', initial_trigger: 'Produto / Código de Barras', focus: 'Velocidade de fechamento no caixa e controle de estoque', order_status_flow: ['REGISTRO_ITENS', 'PAGAMENTO_PIX', 'VENDA_CONCLUIDA'], config: { hide_agenda: true, hide_kitchen: true, main_screen: 'pdv' } },
-          { id: 'b-servicos', key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', initial_trigger: 'Tempo / Horário (Agenda)', focus: 'Gestão de horários, ocupação de profissionais e comissões/repasses', order_status_flow: ['AGENDAMENTO', 'CHECK_IN', 'CHECKOUT', 'PAGAMENTO', 'DIVISAO_COMISSAO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
+          { id: 'b-servicos', key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', initial_trigger: 'Tempo / Horário (Agenda)', focus: 'Gestão de horários, ocupação de profissionais e comissões/repasses', order_status_flow: ['PENDENTE', 'AGENDADO', 'EM_ATENDIMENTO', 'PAGAMENTO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
           { id: 'b-alimentacao', key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', initial_trigger: 'Pedido (Cardápio Digital ou Balcão)', focus: 'Comunicação entre recepção, produção (cozinha) e entrega', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } }
         ]);
       } else {

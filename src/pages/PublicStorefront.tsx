@@ -861,53 +861,24 @@ export const PublicStorefront: React.FC = () => {
   const simulateSuccess = async () => {
     if (!checkoutResult) return;
     try {
-      // Fetch actual installments from database
-      const { data: dbInsts } = await supabase
-        .from('installments')
-        .select('id, number')
-        .eq('invoice_id', checkoutResult.invoiceId);
-
-      if (dbInsts) {
-        // If there's a down payment, we only simulate payment of the entry (installment number 1)
-        const hasDownPayment = checkoutResult.downPaymentAmount > 0;
-
-        await Promise.all(dbInsts.map((inst: any) => {
-          if (hasDownPayment && inst.number !== 1) {
-            // Leave other installments PENDING
-            return Promise.resolve();
-          }
-          return supabase
-            .from('installments')
-            .update({ status: 'PAGO', confirmed_date: new Date().toISOString().split('T')[0] })
-            .eq('id', inst.id);
-        }));
-
-        // Update order
-        await supabase
-          .from('orders')
-          .update({ status: 'APROVADO' })
-          .eq('invoice_id', checkoutResult.invoiceId);
-      }
-
-      setCheckoutResult(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          installments: prev.installments.map(inst => {
-            const isEntry = inst.number === 1 && prev.downPaymentAmount > 0;
-            if (isEntry || prev.downPaymentAmount === 0) {
-              return { ...inst, status: 'PAGO' };
-            }
-            return inst;
-          })
-        };
-      });
-
       setIsPaymentSimulated(true);
       triggerSuccessSoundAndConfetti();
+
+      // Abre o WhatsApp para enviar o comprovante
+      const cleanPhone = store?.contact ? store.contact.replace(/\D/g, '') : '';
+      const hasDownPayment = checkoutResult.downPaymentAmount > 0;
+      const amountPaid = hasDownPayment ? checkoutResult.downPaymentAmount : checkoutResult.totalAmount;
+      const text = encodeURIComponent(
+        `Olá! Envio o comprovante de pagamento do pedido #${checkoutResult.orderNumber} no valor de ${formatBRL(amountPaid)}.`
+      );
+      const waUrl = cleanPhone 
+        ? `https://wa.me/${cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone}?text=${text}`
+        : `https://wa.me/?text=${text}`;
+      
+      window.open(waUrl, '_blank');
     } catch (err) {
       console.error(err);
-      alert('Erro ao simular pagamento.');
+      alert('Erro ao processar.');
     }
   };
 
@@ -1061,7 +1032,7 @@ export const PublicStorefront: React.FC = () => {
                   onClick={simulateSuccess}
                   className="w-full bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-teal-500/10 active:scale-95 transition-all"
                 >
-                  Simular Confirmação de Pagamento
+                  Enviar comprovante no WhatsApp
                 </button>
               </div>
             )}
@@ -1072,7 +1043,7 @@ export const PublicStorefront: React.FC = () => {
                 <div className="text-left space-y-3">
                   <div className="flex justify-between text-xs font-bold text-slate-400 pb-2 border-b border-slate-800">
                     <span>Status de Pagamento</span>
-                    <span className="text-emerald-400 uppercase">Aprovado / Pago</span>
+                    <span className="text-amber-400 uppercase">Aguardando pagamento</span>
                   </div>
 
                   <div className="text-[11px] text-slate-400 space-y-1">
@@ -1113,7 +1084,11 @@ export const PublicStorefront: React.FC = () => {
                             <div className="flex flex-col">
                               <span className="font-bold text-white">{label}</span>
                               <span className="text-[9px] text-slate-500">
-                                {isEntry ? "Pago via Pix" : `Vence no dia ${new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}`}
+                                {isEntry 
+                                  ? (paymentMethod === 'PIX' 
+                                      ? (isPaid ? "Pago via Pix" : "Aguardando pagamento via Pix") 
+                                      : (paymentMethod === 'CREDIT_CARD' ? "Pago via Cartão de Crédito" : "Pago via Cartão de Débito")) 
+                                  : `Vence no dia ${new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}`}
                               </span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1771,7 +1746,7 @@ export const PublicStorefront: React.FC = () => {
                       {downPaymentAmount > 0 && (
                         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-[11px] font-semibold text-amber-700 space-y-2">
                           <div className="flex justify-between items-center pb-1.5 border-b border-amber-200/50">
-                            <span>Sua Entrada Requerida Hoje:</span>
+                            <span>Valor de Entrada Hoje:</span>
                             <span className="font-extrabold text-xs">{formatBRL(downPaymentAmount)}</span>
                           </div>
                           {remainingBalance > 0 && (

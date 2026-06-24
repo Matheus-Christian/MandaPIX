@@ -48,7 +48,7 @@ INSERT INTO public.business_branches (key, name, initial_trigger, focus, order_s
   'Serviços / Salão de Beleza / Clínicas / Estética', 
   'Tempo / Horário (Agenda)', 
   'Gestão de horários, ocupação de profissionais e comissões/repasses', 
-  '["AGENDAMENTO", "CHECK_IN", "CHECKOUT", "PAGAMENTO", "DIVISAO_COMISSAO"]'::jsonb,
+  '["PENDENTE", "AGENDADO", "EM_ATENDIMENTO", "PAGAMENTO"]'::jsonb,
   '{"hide_delivery": true, "hide_kitchen": true, "main_screen": "schedule"}'::jsonb
 ),
 (
@@ -128,3 +128,145 @@ DROP POLICY IF EXISTS "Leitura pública de funcionários para login" ON public.e
 CREATE POLICY "Leitura pública de funcionários para login"
   ON public.employees FOR SELECT
   USING (true);
+
+-- ====================================================================
+-- MandaPIX - Migração: Controle de Acesso e Autenticação de Funcionários
+-- ====================================================================
+
+-- 1. Adicionar coluna allow_wallets na tabela employees
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS allow_wallets BOOLEAN NOT NULL DEFAULT false;
+
+-- 2. Criar ou atualizar a função auxiliar para verificar se o usuário atual é funcionário de um tenant
+CREATE OR REPLACE FUNCTION public.is_employee_of(p_tenant_id UUID)
+RETURNS BOOLEAN SECURITY DEFINER AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.employees 
+    WHERE tenant_id = p_tenant_id AND email = auth.email()
+  );
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3. Atualizar políticas de RLS para incluir acesso a funcionários
+
+-- Lojas (stores)
+DROP POLICY IF EXISTS "Tenants gerenciam suas lojas" ON public.stores;
+CREATE POLICY "Tenants gerenciam suas lojas"
+  ON public.stores FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Clientes (clients)
+DROP POLICY IF EXISTS "Tenants gerenciam seus clientes" ON public.clients;
+CREATE POLICY "Tenants gerenciam seus clientes"
+  ON public.clients FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Catálogos (catalogs)
+DROP POLICY IF EXISTS "Tenants gerenciam seus catálogos" ON public.catalogs;
+CREATE POLICY "Tenants gerenciam seus catálogos"
+  ON public.catalogs FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Produtos (products)
+DROP POLICY IF EXISTS "Tenants gerenciam seus produtos" ON public.products;
+CREATE POLICY "Tenants gerenciam seus produtos"
+  ON public.products FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Faturas (invoices)
+DROP POLICY IF EXISTS "Tenants gerenciam suas faturas" ON public.invoices;
+CREATE POLICY "Tenants gerenciam suas faturas"
+  ON public.invoices FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Parcelas (installments)
+DROP POLICY IF EXISTS "Tenants gerenciam suas parcelas" ON public.installments;
+CREATE POLICY "Tenants gerenciam suas parcelas"
+  ON public.installments FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Pedidos (orders)
+DROP POLICY IF EXISTS "Tenants gerenciam seus pedidos" ON public.orders;
+CREATE POLICY "Tenants gerenciam seus pedidos"
+  ON public.orders FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Carteiras (wallets)
+DROP POLICY IF EXISTS "Tenants gerenciam suas carteiras" ON public.wallets;
+CREATE POLICY "Tenants gerenciam suas carteiras"
+  ON public.wallets FOR ALL
+  USING (
+    auth.uid() = tenant_id OR 
+    (public.is_employee_of(tenant_id) AND EXISTS (
+      SELECT 1 FROM public.employees 
+      WHERE tenant_id = wallets.tenant_id AND email = auth.email() AND allow_wallets = true
+    ))
+  );
+
+-- Calendários (schedule_calendars)
+DROP POLICY IF EXISTS "Tenants gerenciam seus calendários de agendamento" ON public.schedule_calendars;
+CREATE POLICY "Tenants gerenciam seus calendários de agendamento"
+  ON public.schedule_calendars FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Associações Calendário-Catálogo (schedule_calendar_catalogs)
+DROP POLICY IF EXISTS "Tenants gerenciam associações calendário-catálogo" ON public.schedule_calendar_catalogs;
+CREATE POLICY "Tenants gerenciam associações calendário-catálogo"
+  ON public.schedule_calendar_catalogs FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.schedule_calendars sc
+      WHERE sc.id = calendar_id AND (sc.tenant_id = auth.uid() OR public.is_employee_of(sc.tenant_id))
+    )
+  );
+
+-- Slots (schedule_slots)
+DROP POLICY IF EXISTS "Tenants gerenciam seus slots de agendamento" ON public.schedule_slots;
+CREATE POLICY "Tenants gerenciam seus slots de agendamento"
+  ON public.schedule_slots FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Configurações E-commerce (ecommerce_settings)
+DROP POLICY IF EXISTS "Tenants gerenciam suas configurações de e-commerce" ON public.ecommerce_settings;
+CREATE POLICY "Tenants gerenciam suas configurações de e-commerce"
+  ON public.ecommerce_settings FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- 4. Função e trigger para definir automaticamente o tenant_id de novas linhas baseando-se no empregador do funcionário
+CREATE OR REPLACE FUNCTION public.set_tenant_id()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.employees WHERE email = auth.email()) THEN
+    NEW.tenant_id := (SELECT tenant_id FROM public.employees WHERE email = auth.email() LIMIT 1);
+  ELSE
+    NEW.tenant_id := COALESCE(NEW.tenant_id, auth.uid());
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Aplicar o trigger de definição de tenant_id antes do insert
+DROP TRIGGER IF EXISTS set_tenant_id_orders ON public.orders;
+CREATE TRIGGER set_tenant_id_orders BEFORE INSERT ON public.orders FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_invoices ON public.invoices;
+CREATE TRIGGER set_tenant_id_invoices BEFORE INSERT ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_installments ON public.installments;
+CREATE TRIGGER set_tenant_id_installments BEFORE INSERT ON public.installments FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_clients ON public.clients;
+CREATE TRIGGER set_tenant_id_clients BEFORE INSERT ON public.clients FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_catalogs ON public.catalogs;
+CREATE TRIGGER set_tenant_id_catalogs BEFORE INSERT ON public.catalogs FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_products ON public.products;
+CREATE TRIGGER set_tenant_id_products BEFORE INSERT ON public.products FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_wallets ON public.wallets;
+CREATE TRIGGER set_tenant_id_wallets BEFORE INSERT ON public.wallets FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+DROP TRIGGER IF EXISTS set_tenant_id_stores ON public.stores;
+CREATE TRIGGER set_tenant_id_stores BEFORE INSERT ON public.stores FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+

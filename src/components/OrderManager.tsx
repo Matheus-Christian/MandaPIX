@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays, Sparkles, Minus, Plus } from 'lucide-react';
-import { formatBRL } from '../utils/pix';
+import { formatBRL, parseScheduledDate } from '../utils/pix';
 import type { Order, Invoice, ProductService } from '../utils/pix';
 import { supabase } from '../utils/supabaseClient';
 
@@ -184,6 +184,8 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   // Details Modal State
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
+
+
   // Find linked invoice for the selected order
   const linkedInvoice = useMemo(() => {
     if (!selectedOrder?.invoiceId || !invoices) return null;
@@ -248,6 +250,11 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   }, [orders]);
 
   const formatStatusLabel = (status: string) => {
+    const upper = status.toUpperCase();
+    if (upper === 'PENDENTE') return 'Aguardando pagamento';
+    if (upper === 'AGENDADO') return 'Agendado';
+    if (upper === 'EM_ATENDIMENTO') return 'Em atendimento';
+    if (upper === 'PAGAMENTO') return 'Pagamento';
     return status
       .split('_')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
@@ -265,14 +272,16 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
     if (upper === 'CHECKOUT') return 'Checkout';
     if (upper === 'PAGAMENTO') return 'Pagar';
     if (upper === 'DIVISAO_COMISSAO') return 'Concluir repasse';
+    if (upper === 'AGENDADO') return 'Confirmar agendamento';
+    if (upper === 'EM_ATENDIMENTO') return 'Iniciar atendimento';
     return `Ir para ${formatStatusLabel(nextStatus)}`;
   };
 
   const getStatusBadgeClass = (status: string) => {
     const upper = status.toUpperCase();
     if (upper === 'PENDENTE' || upper === 'AGENDAMENTO') return 'bg-amber-50 text-amber-700 border-amber-100';
-    if (upper === 'APROVADO' || upper === 'CHECK_IN') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
-    if (upper === 'PREPARACAO' || upper === 'CHECKOUT') return 'bg-purple-50 text-purple-700 border-purple-100';
+    if (upper === 'APROVADO' || upper === 'CHECK_IN' || upper === 'AGENDADO') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+    if (upper === 'PREPARACAO' || upper === 'CHECKOUT' || upper === 'EM_ATENDIMENTO') return 'bg-purple-50 text-purple-700 border-purple-100';
     if (upper === 'A_CAMINHO' || upper === 'PAGAMENTO') return 'bg-sky-50 text-sky-700 border-sky-100';
     if (upper === 'ENTREGUE' || upper === 'DIVISAO_COMISSAO' || upper === 'VENDA_CONCLUIDA' || upper === 'PEDIDO_ENTREGUE') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if (upper === 'CANCELADO') return 'bg-red-50 text-red-700 border-red-100';
@@ -286,10 +295,30 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
     return ['PENDENTE', 'APROVADO', 'PREPARACAO', 'A_CAMINHO', 'ENTREGUE'];
   }, [activeBranch]);
 
+  // Auto-migrate legacy/invalid statuses of scheduled orders to the default 'PENDENTE' (Aguardando pagamento) when opened
+  useEffect(() => {
+    if (selectedOrder && selectedOrder.scheduledAt) {
+      if (!statusFlow.includes(selectedOrder.status)) {
+        const defaultStatus = statusFlow[0] || 'PENDENTE';
+        supabase
+          .from('orders')
+          .update({ status: defaultStatus })
+          .eq('id', selectedOrder.id)
+          .then(({ error }: { error: any }) => {
+            if (!error) {
+              onUpdateOrderStatus(selectedOrder.id, defaultStatus as any);
+              setSelectedOrder(prev => prev && prev.id === selectedOrder.id ? { ...prev, status: defaultStatus } : prev);
+            }
+          })
+          .catch((err: any) => console.error('Error auto-updating status:', err));
+      }
+    }
+  }, [selectedOrder, statusFlow, onUpdateOrderStatus]);
+
   // Statistics
   const totalCount = orders.length;
   const pendenteCount = orders.filter(o => o.status === 'PENDENTE' || o.status === 'AGENDAMENTO').length;
-  const emAndamentoCount = orders.filter(o => o.status === 'APROVADO' || o.status === 'PREPARACAO' || o.status === 'A_CAMINHO' || o.status === 'CHECK_IN' || o.status === 'CHECKOUT' || o.status === 'PAGAMENTO').length;
+  const emAndamentoCount = orders.filter(o => o.status === 'APROVADO' || o.status === 'PREPARACAO' || o.status === 'A_CAMINHO' || o.status === 'CHECK_IN' || o.status === 'CHECKOUT' || o.status === 'PAGAMENTO' || o.status === 'AGENDADO' || o.status === 'EM_ATENDIMENTO').length;
   const entregueCount = orders.filter(o => o.status === 'ENTREGUE' || o.status === 'DIVISAO_COMISSAO' || o.status === 'VENDA_CONCLUIDA' || o.status === 'PEDIDO_ENTREGUE').length;
 
   const handleCancelClick = (id: string, number: string) => {
@@ -527,9 +556,9 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                                 <div className="flex items-center gap-1 text-pix font-bold">
                                   <CalendarClock className="w-3.5 h-3.5 flex-shrink-0" />
                                   <span className="text-[10px]">
-                                    {new Date(order.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                    {parseScheduledDate(order.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
                                     {' '}
-                                    {new Date(order.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                    {parseScheduledDate(order.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
                               ) : (
@@ -658,7 +687,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                               <div className="flex items-center gap-1 text-[10px] text-pix font-bold bg-pix-light px-2 py-1 rounded-lg w-max">
                                 <CalendarClock className="w-3.5 h-3.5" />
                                 <span>
-                                  {new Date(order.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} às {new Date(order.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                  {parseScheduledDate(order.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} às {parseScheduledDate(order.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </div>
                             )}
@@ -855,10 +884,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   <div>
                     <p className="text-[9px] font-black text-pix uppercase tracking-wide">Pedido Agendado</p>
                     <p className="text-xs font-bold text-slate-800 mt-0.5">
-                      {new Date(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                      {parseScheduledDate(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
                     </p>
                     <p className="text-[10px] text-slate-500 font-semibold">
-                      {new Date(selectedOrder.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      {parseScheduledDate(selectedOrder.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>

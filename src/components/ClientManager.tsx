@@ -14,7 +14,7 @@ import {
   Calendar, 
   Clock 
 } from 'lucide-react';
-import { formatBRL } from '../utils/pix';
+import { formatBRL, parseScheduledDate } from '../utils/pix';
 import type { Client, Order } from '../utils/pix';
 
 interface ClientManagerProps {
@@ -483,7 +483,7 @@ export const ClientManager: React.FC<ClientManagerProps> = ({
                         </div>
                       ) : (
                         appointments.map(app => {
-                          const dateObj = new Date(app.scheduledAt || '');
+                          const dateObj = parseScheduledDate(app.scheduledAt);
                           const isValidDate = !isNaN(dateObj.getTime());
                           const dateFormatted = isValidDate 
                             ? dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })

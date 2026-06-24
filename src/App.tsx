@@ -55,6 +55,7 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { QuickPOS } from './components/QuickPOS';
 import { LandingPage } from './pages/LandingPage';
 import { supabase, isSupabaseConfigured } from './utils/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 import { SupabaseSetupScreen } from './components/SupabaseSetupScreen';
 
 // Protetor de rotas privadas
@@ -157,6 +158,7 @@ function MandaPixApp() {
   const [clients, setClients] = useState<Client[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
+  const currentTenantId = activeEmployee?.tenantId || user?.id;
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinError, setPinError] = useState('');
   const [selectedEmployeeIdForPin, setSelectedEmployeeIdForPin] = useState('');
@@ -232,11 +234,19 @@ function MandaPixApp() {
         .maybeSingle();
       
       if (!error && data) {
+        if (data.key === 'servicos' && data.order_status_flow && data.order_status_flow.includes('AGENDAMENTO')) {
+          const newFlow = ['PENDENTE', 'AGENDADO', 'EM_ATENDIMENTO', 'PAGAMENTO'];
+          await supabase
+            .from('business_branches')
+            .update({ order_status_flow: newFlow })
+            .eq('key', 'servicos');
+          data.order_status_flow = newFlow;
+        }
         setActiveBranch(data);
       } else {
         const fallbacks: Record<string, any> = {
           varejo: { key: 'varejo', name: 'Varejo / Conveniência / Loja Física', order_status_flow: ['REGISTRO_ITENS', 'PAGAMENTO_PIX', 'VENDA_CONCLUIDA'], config: { hide_agenda: true, hide_kitchen: true, main_screen: 'pdv' } },
-          servicos: { key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', order_status_flow: ['AGENDAMENTO', 'CHECK_IN', 'CHECKOUT', 'PAGAMENTO', 'DIVISAO_COMISSAO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
+          servicos: { key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', order_status_flow: ['PENDENTE', 'AGENDADO', 'EM_ATENDIMENTO', 'PAGAMENTO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
           alimentacao: { key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } }
         };
         setActiveBranch(fallbacks[ramo] || fallbacks.varejo);
@@ -259,12 +269,12 @@ function MandaPixApp() {
   }, [activeBranch]);
 
   const loadScheduleData = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     try {
       const [calsRes, catLinksRes, slotsRes] = await Promise.all([
-        supabase.from('schedule_calendars').select('*').eq('tenant_id', user.id).order('created_at'),
+        supabase.from('schedule_calendars').select('*').eq('tenant_id', currentTenantId).order('created_at'),
         supabase.from('schedule_calendar_catalogs').select('*'),
-        supabase.from('schedule_slots').select('*').eq('tenant_id', user.id).order('slot_date').order('slot_time')
+        supabase.from('schedule_slots').select('*').eq('tenant_id', currentTenantId).order('slot_date').order('slot_time')
       ]);
       if (calsRes.data) {
         const catLinks: any[] = catLinksRes.data || [];
@@ -325,21 +335,21 @@ function MandaPixApp() {
   };
 
   const loadStores = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('stores')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setStores(data || []);
   };
   const loadClients = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('clients')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('name', { ascending: true });
     if (error) throw error;
     setClients((data || []).map((d: any) => ({
@@ -353,42 +363,44 @@ function MandaPixApp() {
   };
 
   const loadEmployees = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     try {
       const { data, error } = await supabase
         .from('employees')
         .select('*')
-        .eq('tenant_id', user.id)
+        .eq('tenant_id', currentTenantId)
         .order('name', { ascending: true });
       if (error) throw error;
       setEmployees((data || []).map((d: any) => ({
         id: d.id,
+        tenantId: d.tenant_id,
         storeId: d.store_id,
         name: d.name,
         email: d.email,
         phone: d.phone,
         role: d.role as any,
-        accessCode: d.access_code
+        accessCode: d.access_code,
+        allowWallets: d.allow_wallets
       })));
     } catch (err) {
       console.warn('Erro ao carregar funcionários do Supabase. Usando dados locais:', err);
-      const local = localStorage.getItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`);
+      const local = localStorage.getItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`);
       if (local) {
         setEmployees(JSON.parse(local));
       } else {
         const withStoreIds = DEFAULT_EMPLOYEES.map(emp => ({ ...emp, storeId: activeStoreId || 'store-1' }));
         setEmployees(withStoreIds);
-        localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(withStoreIds));
+        localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`, JSON.stringify(withStoreIds));
       }
     }
   };
 
   const loadCatalogs = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('catalogs')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setCatalogs((data || []).map((d: any) => ({
@@ -400,11 +412,11 @@ function MandaPixApp() {
   };
 
   const loadProducts = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('products')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('name', { ascending: true });
     if (error) throw error;
     setProducts((data || []).map((d: any) => ({
@@ -419,11 +431,11 @@ function MandaPixApp() {
   };
 
   const loadWallets = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('wallets')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('is_primary', { ascending: false });
     if (error) throw error;
     setSavedKeys((data || []).map((d: any) => ({
@@ -442,11 +454,11 @@ function MandaPixApp() {
   };
 
   const loadInvoices = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('invoices')
       .select('*, installments(*)')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setInvoices((data || []).map((d: any) => ({
@@ -480,11 +492,11 @@ function MandaPixApp() {
   };
 
   const loadOrders = async () => {
-    if (!user) return;
+    if (!currentTenantId) return;
     const { data, error } = await supabase
       .from('orders')
       .select('*')
-      .eq('tenant_id', user.id)
+      .eq('tenant_id', currentTenantId)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setOrders((data || []).map((d: any) => ({
@@ -651,6 +663,35 @@ function MandaPixApp() {
   };
 
   useEffect(() => {
+    const checkEmployee = async () => {
+      if (!user) return;
+      try {
+        const { data, error } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (!error && data) {
+          const emp: Employee = {
+            id: data.id,
+            tenantId: data.tenant_id,
+            storeId: data.store_id,
+            name: data.name,
+            email: data.email,
+            phone: data.phone,
+            role: data.role as any,
+            accessCode: data.access_code,
+            allowWallets: data.allow_wallets
+          };
+          setActiveEmployee(emp);
+          setActiveStoreId(data.store_id);
+        }
+      } catch (err) {
+        console.error('Erro ao verificar login direto de funcionário:', err);
+      }
+    };
+    checkEmployee();
     loadAllData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -759,17 +800,39 @@ function MandaPixApp() {
 
   // Callbacks para Funcionários
   const handleAddEmployee = async (newEmpData: Omit<Employee, 'id'>) => {
-    if (!user) return;
+    if (!currentTenantId) return;
     try {
+      // Registrar o funcionário no Supabase Auth para permitir o login direto
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem('VITE_SUPABASE_URL') || '';
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem('VITE_SUPABASE_ANON_KEY') || '';
+      if (supabaseUrl && supabaseAnonKey) {
+        try {
+          const tempSupabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+          await tempSupabase.auth.signUp({
+            email: newEmpData.email,
+            password: newEmpData.accessCode,
+            options: {
+              data: {
+                role: 'tenant' // Perfil inicial para trigger no banco criar perfil tenant
+              }
+            }
+          });
+        } catch (signUpErr) {
+          console.warn('Erro ao criar credenciais de autenticação do funcionário:', signUpErr);
+        }
+      }
+
       const { error } = await supabase
         .from('employees')
         .insert([{
+          tenant_id: currentTenantId,
           store_id: newEmpData.storeId,
           name: newEmpData.name,
           email: newEmpData.email,
           phone: newEmpData.phone,
           role: newEmpData.role,
-          access_code: newEmpData.accessCode
+          access_code: newEmpData.accessCode,
+          allow_wallets: newEmpData.allowWallets || false
         }]);
       if (error) throw error;
       await loadEmployees();
@@ -781,12 +844,12 @@ function MandaPixApp() {
       };
       const updated = [newEmp, ...employees];
       setEmployees(updated);
-      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`, JSON.stringify(updated));
     }
   };
 
   const handleEditEmployee = async (updatedEmp: Employee) => {
-    if (!user) return;
+    if (!currentTenantId) return;
     try {
       const { error } = await supabase
         .from('employees')
@@ -795,7 +858,8 @@ function MandaPixApp() {
           email: updatedEmp.email,
           phone: updatedEmp.phone,
           role: updatedEmp.role,
-          access_code: updatedEmp.accessCode
+          access_code: updatedEmp.accessCode,
+          allow_wallets: updatedEmp.allowWallets || false
         })
         .eq('id', updatedEmp.id);
       if (error) throw error;
@@ -804,12 +868,12 @@ function MandaPixApp() {
       console.warn('Erro ao editar no Supabase, atualizando localmente:', err);
       const updated = employees.map(e => e.id === updatedEmp.id ? updatedEmp : e);
       setEmployees(updated);
-      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`, JSON.stringify(updated));
     }
   };
 
   const handleDeleteEmployee = async (id: string) => {
-    if (!user) return;
+    if (!currentTenantId) return;
     try {
       const { error } = await supabase
         .from('employees')
@@ -821,7 +885,7 @@ function MandaPixApp() {
       console.warn('Erro ao excluir no Supabase, atualizando localmente:', err);
       const updated = employees.filter(e => e.id !== id);
       setEmployees(updated);
-      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${user.id}`, JSON.stringify(updated));
+      localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`, JSON.stringify(updated));
     }
   };
 
@@ -1234,7 +1298,10 @@ function MandaPixApp() {
   ] as const;
 
   const visibleMenuItems = activeEmployee 
-    ? menuItems.filter(item => item.id === 'stores')
+    ? (activeEmployee.allowWallets
+        ? menuItems.filter(item => item.id === 'stores' || item.id === 'wallets')
+        : menuItems.filter(item => item.id === 'stores')
+      )
     : menuItems;
 
   if (loadingData) {
@@ -1316,21 +1383,7 @@ function MandaPixApp() {
               </button>
             )}
           </div>
-          
-          {/* Button to enter employee mode - only shown when in a store and NOT already in employee mode */}
-          {activeStoreId && !activeEmployee && (
-            <button
-              onClick={() => {
-                setPinInput('');
-                setPinError('');
-                setSelectedEmployeeIdForPin('');
-                setIsPinModalOpen(true);
-              }}
-              className="mt-1 flex items-center justify-center gap-1.5 w-full bg-slate-800/80 hover:bg-pix text-white py-1.5 rounded-lg text-[10px] font-bold tracking-wide transition-all border border-slate-700/50 hover:border-transparent active:scale-95 animate-fade-in"
-            >
-              <Users className="w-3.5 h-3.5" /> Entrar como Funcionário
-            </button>
-          )}
+
         </div>
 
         {/* Navigation Menu */}
@@ -1458,21 +1511,7 @@ function MandaPixApp() {
                   )}
                 </div>
                 
-                {/* Button to enter employee mode (Mobile) - only shown when in a store and NOT already in employee mode */}
-                {activeStoreId && !activeEmployee && (
-                  <button
-                    onClick={() => {
-                      setPinInput('');
-                      setPinError('');
-                      setSelectedEmployeeIdForPin('');
-                      setIsPinModalOpen(true);
-                      setIsSidebarOpen(false); // close sidebar to show overlay
-                    }}
-                    className="mt-1 flex items-center justify-center gap-1.5 w-full bg-slate-800 hover:bg-pix text-white py-2 rounded-xl text-[10px] font-bold tracking-wide transition-all border border-slate-700 hover:border-transparent active:scale-95"
-                  >
-                    <Users className="w-3.5 h-3.5" /> Entrar como Funcionário
-                  </button>
-                )}
+
               </div>
               <nav className="space-y-1">
                 {visibleMenuItems.map(item => {

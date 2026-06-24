@@ -444,12 +444,14 @@ export interface Client {
 
 export interface Employee {
   id: string;
+  tenantId?: string;
   storeId?: string;
   name: string;
   email: string;
   phone: string;
   role: 'GERENTE' | 'VENDEDOR' | 'ATENDENTE';
   accessCode: string;
+  allowWallets?: boolean;
 }
 
 export interface Catalog {
@@ -901,5 +903,16 @@ export const slugify = (text: string): string => {
     .replace(/[^\w-]+/g, '') // remove all non-word chars
     .replace(/--+/g, '-'); // replace multiple - with single -
 };
+
+/**
+ * Parses an ISO datetime string while stripping any timezone offsets or Z designator.
+ * This forces JavaScript's Date to parse it in the user's local timezone.
+ */
+export const parseScheduledDate = (dateStr: string | undefined | null): Date => {
+  if (!dateStr) return new Date();
+  const cleanStr = dateStr.replace(/Z|[+-]\d{2}:\d{2}$/, '');
+  return new Date(cleanStr);
+};
+
 
 

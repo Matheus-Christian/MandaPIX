@@ -26,6 +26,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
   const [role, setRole] = useState<'GERENTE' | 'VENDEDOR' | 'ATENDENTE'>('VENDEDOR');
   const [accessCode, setAccessCode] = useState('');
   const [showAccessCode, setShowAccessCode] = useState(false);
+  const [allowWallets, setAllowWallets] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const startEditEmployee = (emp: Employee) => {
@@ -35,6 +36,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setPhone(emp.phone);
     setRole(emp.role);
     setAccessCode(emp.accessCode);
+    setAllowWallets(emp.allowWallets || false);
     setIsAdding(true);
     setErrors({});
   };
@@ -47,6 +49,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setPhone('');
     setRole('VENDEDOR');
     setAccessCode('');
+    setAllowWallets(false);
     setErrors({});
   };
 
@@ -91,6 +94,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         phone: phone.trim(),
         role,
         accessCode: accessCode.trim(),
+        allowWallets: allowWallets,
       });
     } else {
       onAddEmployee({
@@ -99,6 +103,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         phone: phone.trim(),
         role,
         accessCode: accessCode.trim(),
+        allowWallets: allowWallets,
       });
     }
 
@@ -108,6 +113,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setPhone('');
     setRole('VENDEDOR');
     setAccessCode('');
+    setAllowWallets(false);
     setEditingEmployee(null);
     setErrors({});
     setIsAdding(false);
@@ -228,13 +234,26 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowAccessCode(!showAccessCode)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-450 hover:text-slate-600"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-455 hover:text-slate-600"
                   >
                     {showAccessCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
                 {errors.accessCode && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.accessCode}</p>}
                 <p className="text-[10px] text-slate-400 mt-1 font-semibold">Este código será solicitado quando o funcionário selecionar seu perfil para acessar o PDV ou Pedidos da loja.</p>
+              </div>
+
+              <div className="flex items-center gap-2.5 py-3 px-4 bg-slate-50 rounded-xl border border-slate-100">
+                <input
+                  type="checkbox"
+                  id="allowWallets"
+                  checked={allowWallets}
+                  onChange={(e) => setAllowWallets(e.target.checked)}
+                  className="w-4 h-4 text-pix border-slate-300 rounded focus:ring-pix/50 focus:outline-none cursor-pointer"
+                />
+                <label htmlFor="allowWallets" className="text-xs font-bold text-slate-600 uppercase tracking-wide cursor-pointer select-none">
+                  Permitir acesso ao painel de Carteiras
+                </label>
               </div>
 
               <div className="pt-2">
@@ -288,6 +307,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                         <th className="p-4">Cargo</th>
                         <th className="p-4">Contato</th>
                         <th className="p-4">Código / PIN</th>
+                        <th className="p-4">Acesso Carteiras</th>
                         <th className="p-4 text-right pr-6">Ações</th>
                       </tr>
                     </thead>
@@ -321,6 +341,15 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                           </td>
                           <td className="p-4 font-mono font-bold text-slate-655">
                             •••• (PIN Oculto)
+                          </td>
+                          <td className="p-4">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emp.allowWallets 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-rose-50 text-rose-700 border-rose-100'
+                            }`}>
+                              {emp.allowWallets ? 'Permitido' : 'Bloqueado'}
+                            </span>
                           </td>
                           <td className="p-4 text-right pr-6 space-x-1.5 flex items-center justify-end">
                             <button

@@ -643,7 +643,7 @@ INSERT INTO public.business_branches (key, name, initial_trigger, focus, order_s
   'Serviços / Salão de Beleza / Clínicas / Estética', 
   'Tempo / Horário (Agenda)', 
   'Gestão de horários, ocupação de profissionais e comissões/repasses', 
-  '["AGENDAMENTO", "CHECK_IN", "CHECKOUT", "PAGAMENTO", "DIVISAO_COMISSAO"]'::jsonb,
+  '["PENDENTE", "AGENDADO", "EM_ATENDIMENTO", "PAGAMENTO"]'::jsonb,
   '{"hide_delivery": true, "hide_kitchen": true, "main_screen": "schedule"}'::jsonb
 ),
 (

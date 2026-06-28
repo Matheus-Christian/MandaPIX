@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard, CalendarClock, Clock } from 'lucide-react';
-import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload, routePixPayment } from '../utils/pix';
+import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard, CalendarClock, Clock, Globe } from 'lucide-react';
+import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload, routePixPayment, slugify } from '../utils/pix';
 import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog, EcommerceSettings, ScheduleSlot, ScheduleCalendar } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
@@ -20,6 +20,8 @@ interface InvoiceManagerProps {
   ecommerceSettings?: EcommerceSettings | null;
   scheduleSlots: ScheduleSlot[];
   scheduleCalendars: ScheduleCalendar[];
+  storeId?: string | null;
+  storeName?: string;
 }
 
 export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
@@ -38,6 +40,8 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   ecommerceSettings,
   scheduleSlots,
   scheduleCalendars,
+  storeId,
+  storeName = 'Minha Loja',
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PAGO' | 'A_VENCER' | 'VENCIDO'>('TODOS');
@@ -187,6 +191,15 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   } | null>(null);
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const handleCopyPaymentLink = () => {
+    if (!activeInstallment || !storeId) return;
+    const paymentLink = `${window.location.origin}/e/${slugify(storeName)}/${storeId}?invoiceId=${activeInstallment.invoiceId}&installmentId=${activeInstallment.installment.id}`;
+    navigator.clipboard.writeText(paymentLink);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
 
   // Card Payment Simulator States
   const [cardNumber, setCardNumber] = useState('');
@@ -1685,13 +1698,27 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                         </button>
                       </div>
 
-                      {/* Payment Simulator Button */}
+                      {/* Copy Payment Link Button */}
                       <button
-                        onClick={() => handleSimulatePayment('PIX')}
-                        className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-amber-500/10 transition-all active:scale-95"
+                        onClick={handleCopyPaymentLink}
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
+                          linkCopied
+                            ? 'bg-emerald-500/10 border-emerald-300 text-emerald-600 font-extrabold'
+                            : 'bg-pix hover:bg-pix-dark text-white active:scale-98 shadow-md'
+                        }`}
                       >
-                        Simular Recebimento PIX
+                        {linkCopied ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-500" /> Link de Pagamento Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="w-4 h-4" /> Gerar Link de Pagamento PIX
+                          </>
+                        )}
                       </button>
+
+                      {/* Simulation button removed as requested */}
                     </>
                   ) : (
                     /* CARD CHECKOUT SIMULATION FORM */

@@ -343,3 +343,13 @@ CREATE POLICY "Tenants e funcionários gerenciam atestados"
 DROP TRIGGER IF EXISTS set_tenant_id_medical_certificates ON public.medical_certificates;
 CREATE TRIGGER set_tenant_id_medical_certificates BEFORE INSERT ON public.medical_certificates FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
 
+-- 4. Função auxiliar para simulação pública de pagamento de parcelas
+CREATE OR REPLACE FUNCTION public.pay_installment(p_installment_id UUID)
+RETURNS VOID SECURITY DEFINER AS $$
+BEGIN
+  UPDATE public.installments
+  SET status = 'PAGO', confirmed_date = NOW(), payment_method_used = 'PIX'
+  WHERE id = p_installment_id;
+END;
+$$ LANGUAGE plpgsql;
+

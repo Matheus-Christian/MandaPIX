@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { 
   ShoppingBag, 
   ShoppingCart, 
@@ -61,6 +61,7 @@ export const PublicStorefront: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [shopClosedMsg, setShopClosedMsg] = useState<string | null>(null);
+  const [isClinicaStore, setIsClinicaStore] = useState(false);
 
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -113,6 +114,95 @@ export const PublicStorefront: React.FC = () => {
   const [isPaymentSimulated, setIsPaymentSimulated] = useState(false);
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Specific Payment Link States
+  const [searchParams] = useSearchParams();
+  const queryInstallmentId = searchParams.get('installmentId');
+  const [targetInstallment, setTargetInstallment] = useState<any>(null);
+  const [targetInvoice, setTargetInvoice] = useState<any>(null);
+  const [targetClient, setTargetClient] = useState<any>(null);
+  const [loadingPaymentLink, setLoadingPaymentLink] = useState(false);
+
+  // Fetch specific installment details if query param present
+  useEffect(() => {
+    if (queryInstallmentId) {
+      const fetchInstallmentData = async () => {
+        setLoadingPaymentLink(true);
+        try {
+          // 1. Fetch Installment
+          const { data: instData, error: instErr } = await supabase
+            .from('installments')
+            .select('*')
+            .eq('id', queryInstallmentId)
+            .maybeSingle();
+
+          if (instErr || !instData) throw instErr || new Error('Parcela não encontrada.');
+          setTargetInstallment(instData);
+
+          // 2. Fetch Invoice
+          const { data: invData, error: invErr } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('id', instData.invoice_id)
+            .maybeSingle();
+
+          if (invErr || !invData) throw invErr || new Error('Fatura não encontrada.');
+          setTargetInvoice(invData);
+
+          // Fetch Tenant Profile for Branch Key
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('ramo_empresa')
+            .eq('id', invData.tenant_id)
+            .maybeSingle();
+          if (profileData?.ramo_empresa === 'clinica') {
+            setIsClinicaStore(true);
+          }
+
+          // 3. Fetch Client
+          const { data: clientData, error: clientErr } = await supabase
+            .from('clients')
+            .select('*')
+            .eq('id', invData.client_id)
+            .maybeSingle();
+
+          if (!clientErr && clientData) {
+            setTargetClient(clientData);
+          }
+        } catch (err: any) {
+          console.error('Error fetching installment details:', err);
+        } finally {
+          setLoadingPaymentLink(false);
+        }
+      };
+      fetchInstallmentData();
+    }
+  }, [queryInstallmentId]);
+
+  // Render QR Code for specific payment links
+  useEffect(() => {
+    if (targetInstallment?.pix_payload && qrCanvasRef.current) {
+      import('qrcode').then((QRCode) => {
+        QRCode.toCanvas(
+          qrCanvasRef.current!,
+          targetInstallment.pix_payload,
+          {
+            width: 180,
+            margin: 1,
+            color: {
+              dark: '#0f172a',
+              light: '#ffffff'
+            }
+          },
+          (err) => {
+            if (err) console.error('QR rendering error for payment link', err);
+          }
+        );
+      }).catch(err => {
+        console.error('Failed to load QR code generator', err);
+      });
+    }
+  }, [targetInstallment, targetInstallment?.pix_payload]);
+
   // 1. Fetch all store data securely
   useEffect(() => {
     if (!storeId) return;
@@ -134,6 +224,16 @@ export const PublicStorefront: React.FC = () => {
           throw new Error('Loja não encontrada.');
         }
         setStore(storeData as Store);
+
+        // Fetch Tenant Profile for Branch Key
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('ramo_empresa')
+          .eq('id', storeData.tenant_id)
+          .maybeSingle();
+        if (profileData?.ramo_empresa === 'clinica') {
+          setIsClinicaStore(true);
+        }
 
         // Fetch Ecommerce Settings
         const { data: ecoData, error: ecoErr } = await supabase
@@ -941,8 +1041,107 @@ export const PublicStorefront: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between overflow-x-hidden font-sans">
       
-      {/* SUCCESS SCREEN */}
-      {checkoutResult ? (
+      {/* DIRECT PIX PAYMENT LINK PAGE */}
+      {queryInstallmentId && targetInstallment ? (
+        <div className="flex-1 flex items-center justify-center p-6 bg-slate-100 relative overflow-hidden">
+          {loadingPaymentLink ? (
+            <div className="w-8 h-8 border-4 border-pix border-t-transparent rounded-full animate-spin"></div>
+          ) : (
+            <div className="bg-white border border-slate-100 rounded-3xl p-6 md:p-8 w-full max-w-md space-y-6 shadow-2xl relative z-10 text-center">
+              
+              {/* Store Header */}
+              <div className="space-y-1">
+                <h1 className="text-xl font-extrabold text-slate-800">{store?.name || 'MandaPIX Checkout'}</h1>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Link de Pagamento Oficial</p>
+              </div>
+
+              {/* Installment Detail Box */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3 text-left">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-500 pb-2 border-b border-slate-200">
+                  <span>Código da Venda</span>
+                  <span className="font-mono text-slate-850">#{targetInvoice?.invoice_number || targetInvoice?.invoiceNumber}</span>
+                </div>
+
+                <div className="space-y-2 text-xs text-slate-650">
+                  <div className="flex justify-between">
+                    <span>{isClinicaStore ? 'Paciente' : 'Cliente'}</span>
+                    <span className="font-bold text-slate-800">{targetClient?.name || 'Cliente'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Descrição</span>
+                    <span className="font-semibold text-slate-800">{targetInvoice?.description}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Parcela</span>
+                    <span className="font-bold text-slate-800">
+                      {targetInstallment.number} de {targetInvoice?.installments_count}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Data de Vencimento</span>
+                    <span className="font-bold text-slate-850">
+                      {new Date(targetInstallment.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-slate-200 text-sm font-bold">
+                    <span className="text-slate-500">Valor a Pagar</span>
+                    <span className="text-pix text-lg font-black">{formatBRL(Number(targetInstallment.amount))}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Status / QR Code / Success */}
+              {targetInstallment.status === 'PAGO' ? (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 space-y-3.5 text-center animate-fade-in">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-full w-fit mx-auto">
+                    <Check className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-emerald-800 text-sm">Pagamento Confirmado!</h3>
+                    <p className="text-xs text-emerald-600 mt-0.5">Esta parcela já foi paga e baixada no sistema.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                  <div className="flex justify-center">
+                    <div className="bg-white p-2.5 rounded-2xl border border-slate-250 shadow-inner relative">
+                      <canvas ref={qrCanvasRef} className="mx-auto block" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest text-left">Código Copia e Cola</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={targetInstallment.pix_payload || ''}
+                        className="bg-white border border-slate-200 text-slate-650 font-mono text-[9px] rounded-xl px-3 py-2 flex-1 focus:outline-none select-all truncate"
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(targetInstallment.pix_payload || '');
+                          setIsCopied(true);
+                          setTimeout(() => setIsCopied(false), 2000);
+                        }}
+                        className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
+                          isCopied ? 'bg-emerald-500 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'
+                        }`}
+                      >
+                        {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{isCopied ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Simulation button removed for production checkout link */}
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+      ) : checkoutResult ? (
         <div className="flex-1 flex items-center justify-center p-6 bg-slate-950 relative overflow-hidden">
           <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-500/10 rounded-full blur-[120px] pointer-events-none"></div>
           

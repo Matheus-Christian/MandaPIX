@@ -525,7 +525,7 @@ function MandaPixApp() {
         amount: Number(inst.amount),
         dueDate: inst.due_date,
         status: inst.status,
-        pix_payload: inst.pix_payload,
+        pixPayload: inst.pix_payload,
         confirmedDate: inst.confirmed_date,
         paymentMethodUsed: inst.payment_method_used,
         routedGateway: inst.routed_gateway,
@@ -2270,6 +2270,8 @@ function MandaPixApp() {
                     ecommerceSettings={ecommerceSettings}
                     scheduleSlots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
                     scheduleCalendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
+                    storeId={activeStoreId}
+                    storeName={stores.find(s => s.id === activeStoreId)?.name || 'Minha Loja'}
                   />
                 )}
 

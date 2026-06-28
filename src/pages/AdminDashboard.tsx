@@ -313,6 +313,9 @@ export const AdminDashboard: React.FC = () => {
         .from('employees')
         .select('*');
       
+      if (employeesErr) {
+        console.warn('Erro ao carregar funcionários:', employeesErr);
+      }
       const allEmployees = employeesData || [];
       setEmployees(allEmployees);
 

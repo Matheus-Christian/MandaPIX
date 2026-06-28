@@ -653,6 +653,14 @@ INSERT INTO public.business_branches (key, name, initial_trigger, focus, order_s
   'Comunicação entre recepção, produção (cozinha) e entrega', 
   '["ENTRADA_PEDIDO", "CONFIRMACAO_PAGAMENTO", "PRODUCAO_COZINHA", "LOGISTICA_ENVIO", "PEDIDO_ENTREGUE"]'::jsonb,
   '{"hide_agenda": true, "main_screen": "orders"}'::jsonb
+),
+(
+  'clinica', 
+  'Clínicas Médicas / Consultórios', 
+  'Consulta / Agendamento', 
+  'Gestão de prontuários, consultas, atestados médicos e agendamentos', 
+  '["PENDENTE", "CONFIRMADO", "EM_ATENDIMENTO", "ATENDIDO", "CANCELADO"]'::jsonb,
+  '{"hide_delivery": true, "hide_kitchen": true, "main_screen": "schedule"}'::jsonb
 )
 ON CONFLICT (key) DO UPDATE SET
   name = EXCLUDED.name,
@@ -685,6 +693,53 @@ CREATE POLICY "Tenants gerenciam seus funcionários"
 CREATE POLICY "Leitura pública de funcionários para login"
   ON public.employees FOR SELECT
   USING (true);
+
+-- 13. Tabela de Prontuários (medical_records)
+CREATE TABLE IF NOT EXISTS public.medical_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  doctor_name TEXT NOT NULL,
+  diagnosis TEXT NOT NULL,
+  prescription TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE public.medical_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants e funcionários gerenciam prontuários"
+  ON public.medical_records FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Trigger de tenant_id
+DROP TRIGGER IF EXISTS set_tenant_id_medical_records ON public.medical_records;
+CREATE TRIGGER set_tenant_id_medical_records BEFORE INSERT ON public.medical_records FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+-- 14. Tabela de Atestados Médicos (medical_certificates)
+CREATE TABLE IF NOT EXISTS public.medical_certificates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  doctor_name TEXT NOT NULL,
+  doctor_crm TEXT NOT NULL,
+  days_off INTEGER NOT NULL,
+  cid_code TEXT,
+  description TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE public.medical_certificates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenants e funcionários gerenciam atestados"
+  ON public.medical_certificates FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Trigger de tenant_id
+DROP TRIGGER IF EXISTS set_tenant_id_medical_certificates ON public.medical_certificates;
+CREATE TRIGGER set_tenant_id_medical_certificates BEFORE INSERT ON public.medical_certificates FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
 
 
 

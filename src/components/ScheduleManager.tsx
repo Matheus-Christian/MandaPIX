@@ -34,6 +34,7 @@ interface ScheduleManagerProps {
   onAddBulkSlots: (slots: Array<Omit<ScheduleSlot, 'id' | 'currentBookings'>>) => Promise<void>;
   onDeleteSlot: (slotId: string) => Promise<void>;
   onToggleSlot: (slotId: string, isEnabled: boolean) => Promise<void>;
+  isClinica?: boolean;
 }
 
 const DAYS_OF_WEEK = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -67,10 +68,11 @@ interface CalendarListProps {
   onDelete: (id: string) => void;
   onCreate: () => void;
   onEdit: (cal: ScheduleCalendar) => void;
+  isClinica?: boolean;
 }
 
 const CalendarList: React.FC<CalendarListProps> = ({
-  calendars, slots, catalogs, onSelect, onDelete, onCreate, onEdit,
+  calendars, slots, catalogs, onSelect, onDelete, onCreate, onEdit, isClinica = false,
 }) => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -79,10 +81,10 @@ const CalendarList: React.FC<CalendarListProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <CalendarClock className="w-6 h-6 text-pix" />
-            Calendários de Agendamento
+            {isClinica ? 'Agendas Médicas / Consultas' : 'Calendários de Agendamento'}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Cada calendário pode ser associado a um ou mais catálogos desta loja
+            {isClinica ? 'Cada agenda gerencia os horários de consulta para médicos ou procedimentos' : 'Cada calendário pode ser associado a um ou mais catálogos desta loja'}
           </p>
         </div>
         <button
@@ -90,7 +92,7 @@ const CalendarList: React.FC<CalendarListProps> = ({
           className="self-start md:self-auto flex items-center gap-1.5 bg-pix hover:bg-pix-dark text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all active:scale-95"
         >
           <Plus className="w-4 h-4" />
-          Criar Calendário
+          {isClinica ? 'Criar Nova Agenda' : 'Criar Calendário'}
         </button>
       </div>
 
@@ -102,9 +104,9 @@ const CalendarList: React.FC<CalendarListProps> = ({
               <CalendarClock className="w-10 h-10 text-slate-200" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-700 text-base">Nenhum calendário criado</h3>
+              <h3 className="font-bold text-slate-700 text-base">{isClinica ? 'Nenhuma agenda médica criada' : 'Nenhum calendário criado'}</h3>
               <p className="text-sm text-slate-400 mt-1 max-w-xs">
-                Crie um calendário e associe-o a um ou mais catálogos. Os clientes que adicionarem produtos desses catálogos poderão escolher uma data e hora.
+                {isClinica ? 'Crie uma agenda e associe a procedimentos. Pacientes poderão agendar consultas diretamente online.' : 'Crie um calendário e associe-o a um ou mais catálogos. Os clientes que adicionarem produtos desses catálogos poderão escolher uma data e hora.'}
               </p>
             </div>
             <button
@@ -223,11 +225,13 @@ interface CalendarDetailProps {
   onDeleteSlot: (slotId: string) => Promise<void>;
   onToggleSlot: (slotId: string, isEnabled: boolean) => Promise<void>;
   onEdit: (cal: ScheduleCalendar) => void;
+  isClinica?: boolean;
 }
 
 const CalendarDetail: React.FC<CalendarDetailProps> = ({
   calendar, slots, catalogs, onBack, onUpdateCalendar,
   onAddSlot, onAddBulkSlots, onDeleteSlot, onToggleSlot, onEdit,
+  isClinica = false,
 }) => {
   const [weekOffset, setWeekOffset] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -413,13 +417,13 @@ const CalendarDetail: React.FC<CalendarDetailProps> = ({
         {/* Config toggles */}
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
           <div className="px-5 py-3.5 border-b border-slate-50 flex items-center justify-between">
-            <h3 className="font-bold text-slate-800 text-sm">Configurações deste Calendário</h3>
+            <h3 className="font-bold text-slate-800 text-sm">{isClinica ? 'Configurações desta Agenda' : 'Configurações deste Calendário'}</h3>
             {savingConfig && <div className="flex items-center gap-1 text-pix text-[10px] font-bold"><RefreshCw className="w-3 h-3 animate-spin" /> Salvando...</div>}
           </div>
           <div className="divide-y divide-slate-50">
             {([
-              { key: 'isEnabled',         label: 'Habilitar Agendamento',                     desc: 'Ativa o seletor de horário para clientes que adicionarem produtos dos catálogos associados.' },
-              { key: 'requireScheduling', label: 'Agendamento Obrigatório',                   desc: 'Impede finalizar o pedido sem selecionar um slot.' },
+              { key: 'isEnabled',         label: 'Habilitar Agendamento',                     desc: isClinica ? 'Ativa o seletor de horário para pacientes que realizarem agendamentos dos procedimentos associados.' : 'Ativa o seletor de horário para clientes que adicionarem produtos dos catálogos associados.' },
+              { key: 'requireScheduling', label: 'Agendamento Obrigatório',                   desc: isClinica ? 'Impede finalizar o agendamento sem selecionar um horário.' : 'Impede finalizar o pedido sem selecionar um slot.' },
               { key: 'showSlotsToClient', label: 'Mostrar Vagas Disponíveis ao Cliente',      desc: 'Exibe "X vagas restantes" em cada horário.' },
             ] as const).map(({ key, label, desc }) => (
               <div key={key} className={`px-5 py-3.5 flex items-center justify-between transition-opacity ${key !== 'isEnabled' && !calendar.isEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
@@ -700,6 +704,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
   storeName, calendars, slots, catalogs,
   onCreateCalendar, onUpdateCalendar, onDeleteCalendar,
   onAddSlot, onAddBulkSlots, onDeleteSlot, onToggleSlot,
+  isClinica = false,
 }) => {
   const [activeCalendarId, setActiveCalendarId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -766,6 +771,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           onDeleteSlot={onDeleteSlot}
           onToggleSlot={onToggleSlot}
           onEdit={handleStartEdit}
+          isClinica={isClinica}
         />
       ) : (
         <CalendarList
@@ -776,6 +782,7 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({
           onDelete={onDeleteCalendar}
           onCreate={() => setShowCreateModal(true)}
           onEdit={handleStartEdit}
+          isClinica={isClinica}
         />
       )}
 

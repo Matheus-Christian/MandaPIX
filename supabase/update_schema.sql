@@ -20,10 +20,12 @@ CREATE TABLE IF NOT EXISTS public.business_branches (
 ALTER TABLE public.business_branches ENABLE ROW LEVEL SECURITY;
 
 -- Políticas de Segurança (RLS) para business_branches
+DROP POLICY IF EXISTS "Leitura pública de ramos" ON public.business_branches;
 CREATE POLICY "Leitura pública de ramos"
   ON public.business_branches FOR SELECT
   USING (true);
 
+DROP POLICY IF EXISTS "Apenas administradores gerenciam ramos" ON public.business_branches;
 CREATE POLICY "Apenas administradores gerenciam ramos"
   ON public.business_branches FOR ALL
   USING (
@@ -269,4 +271,75 @@ CREATE TRIGGER set_tenant_id_wallets BEFORE INSERT ON public.wallets FOR EACH RO
 
 DROP TRIGGER IF EXISTS set_tenant_id_stores ON public.stores;
 CREATE TRIGGER set_tenant_id_stores BEFORE INSERT ON public.stores FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+-- Permitir que funcionários visualizem o perfil de seu respectivo tenant (necessário para ler o ramo_empresa)
+DROP POLICY IF EXISTS "Funcionários visualizam perfil do tenant" ON public.profiles;
+CREATE POLICY "Funcionários visualizam perfil do tenant"
+  ON public.profiles FOR SELECT
+  USING (public.is_employee_of(id));
+
+-- ====================================================================
+-- MandaPIX - Migração: Clínica Médica e Tabelas LGPD
+-- ====================================================================
+
+-- 1. Inserir Ramo Clínica se não existir
+INSERT INTO public.business_branches (key, name, initial_trigger, focus, order_status_flow, config) VALUES
+(
+  'clinica', 
+  'Clínicas Médicas / Consultórios', 
+  'Consulta / Agendamento', 
+  'Gestão de prontuários, consultas, atestados médicos e agendamentos', 
+  '["PENDENTE", "CONFIRMADO", "EM_ATENDIMENTO", "ATENDIDO", "CANCELADO"]'::jsonb,
+  '{"hide_delivery": true, "hide_kitchen": true, "main_screen": "schedule"}'::jsonb
+)
+ON CONFLICT (key) DO NOTHING;
+
+-- 2. Tabela de Prontuários (medical_records)
+CREATE TABLE IF NOT EXISTS public.medical_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  doctor_name TEXT NOT NULL,
+  diagnosis TEXT NOT NULL,
+  prescription TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE public.medical_records ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Tenants e funcionários gerenciam prontuários" ON public.medical_records;
+CREATE POLICY "Tenants e funcionários gerenciam prontuários"
+  ON public.medical_records FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Trigger de tenant_id
+DROP TRIGGER IF EXISTS set_tenant_id_medical_records ON public.medical_records;
+CREATE TRIGGER set_tenant_id_medical_records BEFORE INSERT ON public.medical_records FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+-- 3. Tabela de Atestados Médicos (medical_certificates)
+CREATE TABLE IF NOT EXISTS public.medical_certificates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  doctor_name TEXT NOT NULL,
+  doctor_crm TEXT NOT NULL,
+  days_off INTEGER NOT NULL,
+  cid_code TEXT,
+  description TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE public.medical_certificates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Tenants e funcionários gerenciam atestados" ON public.medical_certificates;
+CREATE POLICY "Tenants e funcionários gerenciam atestados"
+  ON public.medical_certificates FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Trigger de tenant_id
+DROP TRIGGER IF EXISTS set_tenant_id_medical_certificates ON public.medical_certificates;
+CREATE TRIGGER set_tenant_id_medical_certificates BEFORE INSERT ON public.medical_certificates FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard } from 'lucide-react';
+import { History, Search, Plus, Trash2, X, Calendar, CheckCircle2, AlertCircle, Eye, Landmark, User, QrCode, Copy, Check, ArrowRight, Edit, CreditCard, CalendarClock, Clock } from 'lucide-react';
 import { formatBRL, formatCurrencyInput, parseBRLToNumber, generatePixPayload, routePixPayment } from '../utils/pix';
-import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog, EcommerceSettings } from '../utils/pix';
+import type { Invoice, Client, ProductService, SavedPixKey, Installment, Catalog, EcommerceSettings, ScheduleSlot, ScheduleCalendar } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
 interface InvoiceManagerProps {
@@ -18,6 +18,8 @@ interface InvoiceManagerProps {
   onNavigateToClients: () => void;
   routingSettings?: any;
   ecommerceSettings?: EcommerceSettings | null;
+  scheduleSlots: ScheduleSlot[];
+  scheduleCalendars: ScheduleCalendar[];
 }
 
 export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
@@ -34,6 +36,8 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
   onNavigateToClients,
   routingSettings,
   ecommerceSettings,
+  scheduleSlots,
+  scheduleCalendars,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PAGO' | 'A_VENCER' | 'VENCIDO'>('TODOS');
@@ -227,6 +231,107 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     return today.toISOString().split('T')[0];
   });
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+  // Advanced Form Customization States (Installments Preview & Scheduling)
+  const [customInstallments, setCustomInstallments] = useState<Array<{ number: number; amount: number; dueDate: string }>>([]);
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [selectedCalendarId, setSelectedCalendarId] = useState('');
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [selectedSlotDate, setSelectedSlotDate] = useState(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
+
+  // Automatically recalculate installments layout when parent parameters change
+  useEffect(() => {
+    const totalVal = parseBRLToNumber(amountRaw);
+    const entryVal = entryAmountRaw ? parseBRLToNumber(entryAmountRaw) : 0;
+    const totalRemaining = totalVal - entryVal;
+    
+    if (totalVal <= 0) {
+      setCustomInstallments([]);
+      return;
+    }
+
+    const tempInsts: Array<{ number: number; amount: number; dueDate: string }> = [];
+    const firstDate = new Date(firstDueDate + 'T12:00:00');
+
+    // 1. Entrada (se houver)
+    if (entryVal > 0) {
+      const todayString = new Date().toISOString().split('T')[0];
+      tempInsts.push({
+        number: 1,
+        amount: entryVal,
+        dueDate: todayString
+      });
+    }
+
+    // 2. Parcelas
+    const installmentValue = parseFloat((totalRemaining / installmentsCount).toFixed(2));
+    const actualInstallmentsCount = installmentsCount;
+    for (let i = 1; i <= actualInstallmentsCount; i++) {
+      const installmentNumber = entryVal > 0 ? (i + 1) : i;
+      const dueDateObj = new Date(firstDate);
+      dueDateObj.setMonth(firstDate.getMonth() + (i - 1));
+      
+      const dueDateString = dueDateObj.toISOString().split('T')[0];
+      const instAmount = i === actualInstallmentsCount 
+        ? parseFloat((totalRemaining - (installmentValue * (actualInstallmentsCount - 1))).toFixed(2)) // Rounding adjustment on last installment
+        : installmentValue;
+
+      tempInsts.push({
+        number: installmentNumber,
+        amount: instAmount,
+        dueDate: dueDateString
+      });
+    }
+
+    setCustomInstallments(tempInsts);
+  }, [amountRaw, entryAmountRaw, installmentsCount, firstDueDate]);
+
+  // Synchronize slot lookup date with the first due date of the invoice
+  useEffect(() => {
+    if (firstDueDate) {
+      setSelectedSlotDate(firstDueDate);
+    }
+  }, [firstDueDate]);
+
+  const customInstallmentsSum = customInstallments.reduce((sum, inst) => sum + inst.amount, 0);
+  const totalAmountVal = parseBRLToNumber(amountRaw);
+  const remainingDifference = parseFloat((totalAmountVal - customInstallmentsSum).toFixed(2));
+
+  const handleAutoAdjustInstallments = () => {
+    if (customInstallments.length === 0) return;
+    setCustomInstallments(prev => {
+      const updated = [...prev];
+      const lastIdx = updated.length - 1;
+      const currentSumWithoutLast = updated.slice(0, lastIdx).reduce((sum, i) => sum + i.amount, 0);
+      const newLastAmount = parseFloat((totalAmountVal - currentSumWithoutLast).toFixed(2));
+      updated[lastIdx] = { ...updated[lastIdx], amount: newLastAmount };
+      return updated;
+    });
+  };
+
+  const handleRedistributeInstallments = () => {
+    const entryVal = entryAmountRaw ? parseBRLToNumber(entryAmountRaw) : 0;
+    const totalRemaining = totalAmountVal - entryVal;
+    const count = entryVal > 0 ? customInstallments.length - 1 : customInstallments.length;
+    const installmentValue = parseFloat((totalRemaining / count).toFixed(2));
+
+    setCustomInstallments(prev => {
+      return prev.map((inst, idx) => {
+        if (entryVal > 0 && idx === 0) {
+          return { ...inst, amount: entryVal };
+        }
+        const isLast = idx === prev.length - 1;
+        const instAmount = isLast
+          ? parseFloat((totalRemaining - (installmentValue * (count - 1))).toFixed(2))
+          : installmentValue;
+        
+        return { ...inst, amount: instAmount };
+      });
+    });
+  };
 
   // Populate primary key / settings key
   useEffect(() => {
@@ -452,6 +557,17 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     if (!pixKeyId) newErrors.pixKey = 'Selecione uma chave PIX para receber';
     if (!firstDueDate) newErrors.dueDate = 'Data de vencimento é obrigatória';
 
+    // Validação da soma das parcelas customizadas
+    if (amountVal > 0 && remainingDifference !== 0) {
+      newErrors.amount = `A soma das parcelas (R$ ${customInstallmentsSum.toFixed(2)}) difere do total (R$ ${totalAmountVal.toFixed(2)}). Diferença: R$ ${remainingDifference.toFixed(2)}`;
+    }
+
+    // Validação do agendamento se estiver ativo
+    if (isScheduled) {
+      if (!selectedCalendarId) newErrors.calendar = 'Selecione um calendário';
+      if (!selectedSlotId) newErrors.slot = 'Selecione um horário disponível';
+    }
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
@@ -459,10 +575,8 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
 
     const key = savedKeys.find(k => k.id === pixKeyId)!;
     
-    // Generate Installments
+    // Generate Installments based on customInstallments edited by the user
     const newInstallments: Installment[] = [];
-    const firstDate = new Date(firstDueDate + 'T12:00:00');
-
     let finalTotalAmount = 0;
     let totalFee = 0;
     let routedGatewayName: string | undefined = undefined;
@@ -471,86 +585,15 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       ? String(Math.max(...invoices.map(inv => parseInt(inv.invoiceNumber) || 1000)) + 1)
       : '1001';
 
-    // 1. Entrada (se houver)
-    if (entryVal > 0) {
-      const todayString = new Date().toISOString().split('T')[0];
+    for (const inst of customInstallments) {
       let pixPayload = '';
       let instGateway = undefined;
       let instFee = undefined;
-      let instAmount = entryVal;
+      let instAmount = inst.amount;
 
-      if (key.walletType === 'PIX') {
-        pixPayload = generatePixPayload({
-          key: key.key,
-          keyType: key.type,
-          name: key.name,
-          city: key.city,
-          amount: instAmount,
-          description: `#${invoiceNum} Entrada`.substring(0, 72)
-        });
-        finalTotalAmount += instAmount;
-      } else if (key.walletType === 'PIX_AUTO') {
-        const route = routePixPayment(instAmount, routingSettings || {
-          threshold: 100,
-          below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
-          above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
-        });
-
-        instGateway = route.gateway;
-        instFee = route.fee;
-        instAmount = route.total;
-        
-        pixPayload = generatePixPayload({
-          key: route.key,
-          keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
-          name: `MandaPIX Central (${route.gateway})`,
-          city: 'SAO PAULO',
-          amount: route.total,
-          description: `#${invoiceNum} Entrada`.substring(0, 72)
-        });
-
-        finalTotalAmount += route.total;
-        totalFee += route.fee;
-        routedGatewayName = route.gateway;
-      } else {
-        pixPayload = `card_payment_token_${Date.now()}_entry_${instAmount}`;
-        finalTotalAmount += instAmount;
-      }
-
-      newInstallments.push({
-        id: `inst-${Date.now()}-entry`,
-        number: 1,
-        amount: instAmount,
-        dueDate: todayString,
-        status: 'PENDENTE',
-        pixPayload,
-        paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
-        routedGateway: instGateway,
-        transactionFee: instFee
-      } as any);
-    }
-
-    // 2. Parcelas restantes
-    const totalRemaining = amountVal - entryVal;
-    const installmentValue = parseFloat((totalRemaining / installmentsCount).toFixed(2));
-
-    for (let i = 1; i <= installmentsCount; i++) {
-      const installmentNumber = entryVal > 0 ? (i + 1) : i;
-      const dueDateObj = new Date(firstDate);
-      dueDateObj.setMonth(firstDate.getMonth() + (i - 1));
-      
-      const dueDateString = dueDateObj.toISOString().split('T')[0];
-      let instAmount = i === installmentsCount 
-        ? parseFloat((totalRemaining - (installmentValue * (installmentsCount - 1))).toFixed(2)) // Adjust last rounding cents
-        : installmentValue;
-
-      let pixPayload = '';
-      let instGateway = undefined;
-      let instFee = undefined;
-
-      const descLabel = entryVal > 0 
-        ? `#${invoiceNum} Parc ${i}/${installmentsCount}`
-        : `#${invoiceNum} Parc ${i}/${installmentsCount}`;
+      const descLabel = inst.number === 1 && entryVal > 0 
+        ? `#${invoiceNum} Entrada`
+        : `#${invoiceNum} Parc ${inst.number}`;
 
       if (key.walletType === 'PIX') {
         pixPayload = generatePixPayload({
@@ -591,10 +634,10 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       }
 
       newInstallments.push({
-        id: `inst-${Date.now()}-${installmentNumber}`,
-        number: installmentNumber,
+        id: `inst-${Date.now()}-${inst.number}-${Math.random().toString(36).substring(2, 5)}`,
+        number: inst.number,
         amount: instAmount,
-        dueDate: dueDateString,
+        dueDate: inst.dueDate,
         status: 'PENDENTE',
         pixPayload,
         paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
@@ -603,26 +646,30 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
       } as any);
     }
 
-    const newInvoiceNum = invoices.length > 0 
-      ? String(Math.max(...invoices.map(inv => parseInt(inv.invoiceNumber) || 1000)) + 1)
-      : '1001';
+    const selectedSlotObj = isScheduled ? scheduleSlots.find(s => s.id === selectedSlotId) : null;
+    const scheduledAtString = selectedSlotObj ? `${selectedSlotObj.slotDate}T${selectedSlotObj.slotTime}:00` : undefined;
 
     const newInvoice: Invoice = {
       id: `inv-${Date.now()}`,
-      invoiceNumber: newInvoiceNum,
+      invoiceNumber: invoiceNum,
       clientId,
       productServiceId: productServiceId === 'manual' ? undefined : productServiceId,
       description: description.trim(),
       totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
       dateCreated: new Date().toISOString().split('T')[0],
-      installmentsCount: entryVal > 0 ? installmentsCount + 1 : installmentsCount,
+      installmentsCount: newInstallments.length,
       pixKeyId,
       walletId: pixKeyId,
       paymentMethodUsed: key.walletType === 'PIX_AUTO' ? 'PIX' : key.walletType as any,
       installments: newInstallments,
       routedGateway: routedGatewayName,
-      transactionFee: totalFee > 0 ? parseFloat(totalFee.toFixed(2)) : undefined
-    } as any;
+      transactionFee: totalFee > 0 ? parseFloat(totalFee.toFixed(2)) : undefined,
+      
+      // Scheduling properties
+      scheduleSlotId: isScheduled ? selectedSlotId : undefined,
+      scheduleCalendarId: isScheduled ? selectedCalendarId : undefined,
+      scheduledAt: scheduledAtString
+    };
 
     onAddInvoice(newInvoice);
 
@@ -633,6 +680,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
     setAmountRaw('');
     setEntryAmountRaw('');
     setInstallmentsCount(1);
+    setIsScheduled(false);
+    setSelectedCalendarId('');
+    setSelectedSlotId('');
     setErrors({});
     setIsAdding(false);
   };
@@ -894,6 +944,222 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                     />
                     {errors.dueDate && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.dueDate}</p>}
                   </div>
+                </div>
+
+                {/* Custom Installment Editor */}
+                {customInstallments.length > 0 && (
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100/80 space-y-4 shadow-inner">
+                    <div className="flex justify-between items-center text-left">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">Detalhamento das Parcelas</h4>
+                        <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Personalize os vencimentos e valores de cada parcela</p>
+                      </div>
+                      
+                      {customInstallments.length > 1 && (
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleRedistributeInstallments}
+                            className="px-2 py-1 bg-white hover:bg-slate-100 text-[9px] font-extrabold text-slate-600 rounded-lg border border-slate-200 transition-all active:scale-95 shadow-sm"
+                            title="Distribuir o valor restante igualmente entre todas as parcelas"
+                          >
+                            Redistribuir
+                          </button>
+                          {remainingDifference !== 0 && (
+                            <button
+                              type="button"
+                              onClick={handleAutoAdjustInstallments}
+                              className="px-2 py-1 bg-pix/10 hover:bg-pix/20 text-[9px] font-extrabold text-pix rounded-lg border border-pix/20 transition-all active:scale-95 shadow-sm"
+                              title="Ajustar a diferença de centavos na última parcela"
+                            >
+                              Ajustar Centavos
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-1 no-scrollbar">
+                      {customInstallments.map((inst, index) => (
+                        <div key={index} className="bg-white p-3 rounded-xl border border-slate-200/60 shadow-sm flex flex-col gap-2 text-left">
+                          <div className="flex justify-between items-center border-b border-slate-50 pb-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                              {inst.number === 1 && parseBRLToNumber(entryAmountRaw) > 0 ? 'Entrada (1ª)' : `Parcela ${inst.number}`}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">#{inst.number}</span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[8px] font-extrabold text-slate-450 uppercase mb-0.5">Valor (R$)</label>
+                              <div className="relative">
+                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-[10px]">R$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={inst.amount}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setCustomInstallments(prev => prev.map((item, idx) => idx === index ? { ...item, amount: val } : item));
+                                    if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
+                                  }}
+                                  className="w-full pl-6 pr-1 py-1 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-800 focus:outline-none focus:bg-white font-bold"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[8px] font-extrabold text-slate-450 uppercase mb-0.5">Vencimento</label>
+                              <input
+                                type="date"
+                                value={inst.dueDate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setCustomInstallments(prev => prev.map((item, idx) => idx === index ? { ...item, dueDate: val } : item));
+                                }}
+                                className="w-full px-1.5 py-1 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-800 focus:outline-none focus:bg-white font-semibold"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Soma and validation helpers */}
+                    <div className="flex justify-between items-center text-left pt-2 border-t border-slate-200/60 text-xs font-semibold">
+                      <div className="space-y-0.5">
+                        <span className="text-[9px] uppercase tracking-wide text-slate-450 block">Soma das Parcelas</span>
+                        <span className="text-slate-800 font-bold">{formatBRL(customInstallmentsSum)}</span>
+                      </div>
+                      <div className="text-right space-y-0.5">
+                        <span className="text-[9px] uppercase tracking-wide text-slate-450 block">Diferença</span>
+                        <span className={`font-black ${remainingDifference === 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                          {remainingDifference === 0 ? 'Concluído (R$ 0,00)' : formatBRL(remainingDifference)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Calendar Linkage Section */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100/80 space-y-4 shadow-inner text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="w-5 h-5 text-pix" />
+                      <div>
+                        <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">Vincular a um Agendamento</h4>
+                        <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Bloqueie um horário de atendimento para o cliente</p>
+                      </div>
+                    </div>
+                    
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={isScheduled} 
+                        onChange={(e) => {
+                          setIsScheduled(e.target.checked);
+                          if (e.target.checked && scheduleCalendars.length > 0 && !selectedCalendarId) {
+                            setSelectedCalendarId(scheduleCalendars[0].id);
+                          }
+                        }}
+                        className="sr-only peer" 
+                      />
+                      <div className="w-9 h-5 bg-slate-250 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-350 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pix"></div>
+                    </label>
+                  </div>
+
+                  {isScheduled && (
+                    <div className="space-y-4 pt-2 border-t border-slate-200/60 animate-fade-in">
+                      {scheduleCalendars.length === 0 ? (
+                        <p className="text-[10px] text-amber-600 font-bold">
+                          * Nenhum calendário de agendamento ativo cadastrado nesta loja. Configure-os na aba de Agendamento.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Calendar Dropdown */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Calendário</label>
+                            <select
+                              value={selectedCalendarId}
+                              onChange={(e) => {
+                                setSelectedCalendarId(e.target.value);
+                                setSelectedSlotId('');
+                              }}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 shadow-sm font-semibold"
+                            >
+                              {scheduleCalendars.map(cal => (
+                                <option key={cal.id} value={cal.id}>{cal.name}</option>
+                              ))}
+                            </select>
+                            {errors.calendar && <p className="text-red-500 text-[9px] mt-0.5">{errors.calendar}</p>}
+                          </div>
+
+                          {/* Slot Date */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1">Data da Vaga</label>
+                            <input
+                              type="date"
+                              value={selectedSlotDate}
+                              onChange={(e) => {
+                                setSelectedSlotDate(e.target.value);
+                                setSelectedSlotId('');
+                              }}
+                              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 shadow-sm font-semibold"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Slots Grid Selector */}
+                      {selectedCalendarId && (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-1.5">Horários Disponíveis ({selectedSlotDate.split('-').reverse().join('/')})</label>
+                          {(() => {
+                            const filteredSlots = scheduleSlots.filter(s => 
+                              s.calendarId === selectedCalendarId && 
+                              s.slotDate === selectedSlotDate && 
+                              s.isEnabled && 
+                              s.currentBookings < s.maxCapacity
+                            );
+
+                            if (filteredSlots.length === 0) {
+                              return (
+                                <div className="text-center py-4 bg-white rounded-xl border border-slate-200 border-dashed text-slate-400">
+                                  <Clock className="w-5 h-5 mx-auto text-slate-350 mb-1" />
+                                  <span className="text-[10px] font-bold">Nenhum horário disponível para esta data</span>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-40 overflow-y-auto no-scrollbar">
+                                {filteredSlots.map(slot => {
+                                  const isSelected = selectedSlotId === slot.id;
+                                  return (
+                                    <button
+                                      key={slot.id}
+                                      type="button"
+                                      onClick={() => setSelectedSlotId(slot.id)}
+                                      className={`py-2 px-3 text-xs font-black rounded-xl border text-center transition-all ${
+                                        isSelected 
+                                          ? 'bg-pix text-white border-pix shadow-md shadow-pix/10' 
+                                          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                                      }`}
+                                    >
+                                      {slot.slotTime.substring(0, 5)}
+                                      <span className={`block text-[7px] mt-0.5 ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
+                                        Vagas: {slot.maxCapacity - slot.currentBookings}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                          {errors.slot && <p className="text-red-500 text-[9px] mt-1">{errors.slot}</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-2">

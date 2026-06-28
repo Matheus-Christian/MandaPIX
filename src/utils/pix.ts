@@ -498,6 +498,11 @@ export interface Invoice {
   walletId?: string; // Clear named property mapping
   paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
   installments: Installment[];
+  scheduleSlotId?: string;
+  scheduleCalendarId?: string;
+  scheduledAt?: string;
+  routedGateway?: string;
+  transactionFee?: number;
 }
 
 export const DEFAULT_STORES: Store[] = [

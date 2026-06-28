@@ -142,6 +142,7 @@ function MandaPixApp() {
   const firstName = getFirstName();
 
   const [activeBranch, setActiveBranch] = useState<any>(null);
+  const isClinica = activeBranch?.key === 'clinica';
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -159,6 +160,7 @@ function MandaPixApp() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
   const currentTenantId = activeEmployee?.tenantId || user?.id;
+  const isDirectEmployee = !!(activeEmployee && user && activeEmployee.email === user.email);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinError, setPinError] = useState('');
   const [selectedEmployeeIdForPin, setSelectedEmployeeIdForPin] = useState('');
@@ -224,8 +226,33 @@ function MandaPixApp() {
     }
   };
 
-  const loadActiveBranch = async () => {
-    const ramo = profile?.ramo_empresa || 'varejo';
+  const loadActiveBranch = async (tenantId = currentTenantId) => {
+    let ramo = profile?.ramo_empresa || 'varejo';
+
+    if (activeEmployee && tenantId && tenantId !== user?.id) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('ramo_empresa')
+          .eq('id', tenantId)
+          .maybeSingle();
+        if (!error && data?.ramo_empresa) {
+          ramo = data.ramo_empresa;
+        } else {
+          const localRamo = localStorage.getItem(`MANDAPIX_LOCAL_BRANCH_${tenantId}`);
+          if (localRamo) ramo = localRamo;
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar ramo do tenant:', err);
+        const localRamo = localStorage.getItem(`MANDAPIX_LOCAL_BRANCH_${tenantId}`);
+        if (localRamo) ramo = localRamo;
+      }
+    } else if (!activeEmployee && user) {
+      if (profile?.ramo_empresa) {
+        localStorage.setItem(`MANDAPIX_LOCAL_BRANCH_${user.id}`, profile.ramo_empresa);
+      }
+    }
+
     try {
       const { data, error } = await supabase
         .from('business_branches')
@@ -247,7 +274,8 @@ function MandaPixApp() {
         const fallbacks: Record<string, any> = {
           varejo: { key: 'varejo', name: 'Varejo / Conveniência / Loja Física', order_status_flow: ['REGISTRO_ITENS', 'PAGAMENTO_PIX', 'VENDA_CONCLUIDA'], config: { hide_agenda: true, hide_kitchen: true, main_screen: 'pdv' } },
           servicos: { key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', order_status_flow: ['PENDENTE', 'AGENDADO', 'EM_ATENDIMENTO', 'PAGAMENTO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
-          alimentacao: { key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } }
+          alimentacao: { key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } },
+          clinica: { key: 'clinica', name: 'Clínicas Médicas / Consultórios', order_status_flow: ['PENDENTE', 'CONFIRMADO', 'EM_ATENDIMENTO', 'ATENDIDO', 'CANCELADO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } }
         };
         setActiveBranch(fallbacks[ramo] || fallbacks.varejo);
       }
@@ -257,24 +285,39 @@ function MandaPixApp() {
   };
 
   useEffect(() => {
-    if (profile) {
-      loadActiveBranch();
+    if (profile || activeEmployee) {
+      loadActiveBranch(activeEmployee?.tenantId || user?.id);
     }
-  }, [profile]);
+  }, [profile, activeEmployee, user]);
 
   useEffect(() => {
     if (activeBranch?.config?.main_screen) {
-      setActiveSubTab(activeBranch.config.main_screen);
+      const targetTab = activeBranch.config.main_screen;
+      let allowed = true;
+      if (activeEmployee) {
+        if (activeEmployee.role === 'GERENTE') {
+          if (targetTab === 'ecommerce' || targetTab === 'cobranças') allowed = false;
+        } else if (activeEmployee.role === 'VENDEDOR') {
+          if (!['pdv', 'orders', 'schedule'].includes(targetTab)) allowed = false;
+        } else if (activeEmployee.role === 'ATENDENTE') {
+          if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(targetTab)) allowed = false;
+        }
+      }
+      if (allowed) {
+        setActiveSubTab(targetTab as any);
+      } else {
+        setActiveSubTab('orders');
+      }
     }
-  }, [activeBranch]);
+  }, [activeBranch, activeEmployee]);
 
-  const loadScheduleData = async () => {
-    if (!currentTenantId) return;
+  const loadScheduleData = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     try {
       const [calsRes, catLinksRes, slotsRes] = await Promise.all([
-        supabase.from('schedule_calendars').select('*').eq('tenant_id', currentTenantId).order('created_at'),
+        supabase.from('schedule_calendars').select('*').eq('tenant_id', tenantId).order('created_at'),
         supabase.from('schedule_calendar_catalogs').select('*'),
-        supabase.from('schedule_slots').select('*').eq('tenant_id', currentTenantId).order('slot_date').order('slot_time')
+        supabase.from('schedule_slots').select('*').eq('tenant_id', tenantId).order('slot_date').order('slot_time')
       ]);
       if (calsRes.data) {
         const catLinks: any[] = catLinksRes.data || [];
@@ -334,22 +377,22 @@ function MandaPixApp() {
     }
   };
 
-  const loadStores = async () => {
-    if (!currentTenantId) return;
+  const loadStores = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('stores')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setStores(data || []);
   };
-  const loadClients = async () => {
-    if (!currentTenantId) return;
+  const loadClients = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('clients')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('name', { ascending: true });
     if (error) throw error;
     setClients((data || []).map((d: any) => ({
@@ -362,13 +405,13 @@ function MandaPixApp() {
     })));
   };
 
-  const loadEmployees = async () => {
-    if (!currentTenantId) return;
+  const loadEmployees = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     try {
       const { data, error } = await supabase
         .from('employees')
         .select('*')
-        .eq('tenant_id', currentTenantId)
+        .eq('tenant_id', tenantId)
         .order('name', { ascending: true });
       if (error) throw error;
       setEmployees((data || []).map((d: any) => ({
@@ -384,23 +427,23 @@ function MandaPixApp() {
       })));
     } catch (err) {
       console.warn('Erro ao carregar funcionários do Supabase. Usando dados locais:', err);
-      const local = localStorage.getItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`);
+      const local = localStorage.getItem(`MANDAPIX_LOCAL_EMPLOYEES_${tenantId}`);
       if (local) {
         setEmployees(JSON.parse(local));
       } else {
         const withStoreIds = DEFAULT_EMPLOYEES.map(emp => ({ ...emp, storeId: activeStoreId || 'store-1' }));
         setEmployees(withStoreIds);
-        localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${currentTenantId}`, JSON.stringify(withStoreIds));
+        localStorage.setItem(`MANDAPIX_LOCAL_EMPLOYEES_${tenantId}`, JSON.stringify(withStoreIds));
       }
     }
   };
 
-  const loadCatalogs = async () => {
-    if (!currentTenantId) return;
+  const loadCatalogs = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('catalogs')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: true });
     if (error) throw error;
     setCatalogs((data || []).map((d: any) => ({
@@ -411,12 +454,12 @@ function MandaPixApp() {
     })));
   };
 
-  const loadProducts = async () => {
-    if (!currentTenantId) return;
+  const loadProducts = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('products')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('name', { ascending: true });
     if (error) throw error;
     setProducts((data || []).map((d: any) => ({
@@ -430,12 +473,12 @@ function MandaPixApp() {
     })));
   };
 
-  const loadWallets = async () => {
-    if (!currentTenantId) return;
+  const loadWallets = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('wallets')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('is_primary', { ascending: false });
     if (error) throw error;
     setSavedKeys((data || []).map((d: any) => ({
@@ -453,12 +496,12 @@ function MandaPixApp() {
     })));
   };
 
-  const loadInvoices = async () => {
-    if (!currentTenantId) return;
+  const loadInvoices = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('invoices')
       .select('*, installments(*)')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setInvoices((data || []).map((d: any) => ({
@@ -482,7 +525,7 @@ function MandaPixApp() {
         amount: Number(inst.amount),
         dueDate: inst.due_date,
         status: inst.status,
-        pixPayload: inst.pix_payload,
+        pix_payload: inst.pix_payload,
         confirmedDate: inst.confirmed_date,
         paymentMethodUsed: inst.payment_method_used,
         routedGateway: inst.routed_gateway,
@@ -491,12 +534,12 @@ function MandaPixApp() {
     })));
   };
 
-  const loadOrders = async () => {
-    if (!currentTenantId) return;
+  const loadOrders = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
     const { data, error } = await supabase
       .from('orders')
       .select('*')
-      .eq('tenant_id', currentTenantId)
+      .eq('tenant_id', tenantId)
       .order('date_created', { ascending: false });
     if (error) throw error;
     setOrders((data || []).map((d: any) => ({
@@ -663,36 +706,118 @@ function MandaPixApp() {
   };
 
   useEffect(() => {
-    const checkEmployee = async () => {
-      if (!user) return;
+    const initSessionAndLoad = async () => {
+      if (!user) {
+        setActiveEmployee(null);
+        setLoadingData(false);
+        return;
+      }
+      setLoadingData(true);
+      
+      let tenantIdToUse = user.id;
+      
       try {
-        const { data, error } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('email', user.email)
-          .maybeSingle();
+        let employeeData: any = null;
 
-        if (!error && data) {
+        // 1. Tentar buscar no banco de dados
+        try {
+          const { data, error } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('email', user.email)
+            .maybeSingle();
+          if (!error && data) {
+            employeeData = data;
+          }
+        } catch (dbErr) {
+          console.warn('Tabela de funcionários não encontrada ou erro no banco. Usando fallback local:', dbErr);
+        }
+
+        // 2. Fallback: Varrer todas as chaves do localStorage para encontrar o funcionário por e-mail (para testes locais/offline)
+        if (!employeeData) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('MANDAPIX_LOCAL_EMPLOYEES_')) {
+              try {
+                const localEmps = JSON.parse(localStorage.getItem(key) || '[]');
+                const found = localEmps.find((e: any) => e.email === user.email);
+                if (found) {
+                  employeeData = {
+                    id: found.id,
+                    tenant_id: key.replace('MANDAPIX_LOCAL_EMPLOYEES_', ''),
+                    store_id: found.storeId,
+                    name: found.name,
+                    email: found.email,
+                    phone: found.phone,
+                    role: found.role,
+                    access_code: found.accessCode,
+                    allow_wallets: found.allowWallets
+                  };
+                  break;
+                }
+              } catch (parseErr) {
+                console.error('Erro ao ler funcionários locais no login:', parseErr);
+              }
+            }
+          }
+        }
+
+        if (employeeData) {
           const emp: Employee = {
-            id: data.id,
-            tenantId: data.tenant_id,
-            storeId: data.store_id,
-            name: data.name,
-            email: data.email,
-            phone: data.phone,
-            role: data.role as any,
-            accessCode: data.access_code,
-            allowWallets: data.allow_wallets
+            id: employeeData.id,
+            tenantId: employeeData.tenant_id,
+            storeId: employeeData.store_id,
+            name: employeeData.name,
+            email: employeeData.email,
+            phone: employeeData.phone,
+            role: employeeData.role as any,
+            accessCode: employeeData.access_code,
+            allowWallets: employeeData.allow_wallets
           };
           setActiveEmployee(emp);
-          setActiveStoreId(data.store_id);
+          setActiveStoreId(employeeData.store_id);
+          tenantIdToUse = employeeData.tenant_id;
+          setActiveTab('stores');
+          
+          let allowed = true;
+          if (employeeData.role === 'GERENTE') {
+            if (activeSubTab === 'ecommerce' || activeSubTab === 'cobranças') allowed = false;
+          } else if (employeeData.role === 'VENDEDOR') {
+            if (!['pdv', 'orders', 'schedule'].includes(activeSubTab)) allowed = false;
+          } else if (employeeData.role === 'ATENDENTE') {
+            if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(activeSubTab)) allowed = false;
+          }
+          if (!allowed) {
+            setActiveSubTab('orders');
+          }
+        } else {
+          setActiveEmployee(null);
         }
       } catch (err) {
         console.error('Erro ao verificar login direto de funcionário:', err);
       }
+
+      try {
+        await Promise.all([
+          loadStores(tenantIdToUse),
+          loadClients(tenantIdToUse),
+          loadEmployees(tenantIdToUse),
+          loadCatalogs(tenantIdToUse),
+          loadProducts(tenantIdToUse),
+          loadWallets(tenantIdToUse),
+          loadInvoices(tenantIdToUse),
+          loadOrders(tenantIdToUse),
+          loadRoutingSettings(),
+          loadScheduleData(tenantIdToUse)
+        ]);
+      } catch (err) {
+        console.error('Erro ao carregar dados do Supabase:', err);
+      } finally {
+        setLoadingData(false);
+      }
     };
-    checkEmployee();
-    loadAllData();
+
+    initSessionAndLoad();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -1026,6 +1151,44 @@ function MandaPixApp() {
       
       if (instError) throw instError;
 
+      // Se houver agendamento de slot ativo associado a esta venda
+      if (newInvoice.scheduleSlotId && newInvoice.scheduleCalendarId && newInvoice.scheduledAt) {
+        const clientObj = clients.find(c => c.id === newInvoice.clientId);
+        
+        // 1. Inserir pedido correspondente na tabela de pedidos (para aparecer na agenda)
+        const { error: orderError } = await supabase
+          .from('orders')
+          .insert([{
+            store_id: newInvoice.storeId,
+            order_number: newInvoice.invoiceNumber,
+            client_name: clientObj?.name || 'Cliente Avulso',
+            client_phone: clientObj?.phone || '',
+            client_email: clientObj?.email || '',
+            client_document: clientObj?.document || '',
+            items: [{ productServiceId: newInvoice.productServiceId || '', name: newInvoice.description, quantity: 1, price: newInvoice.totalAmount }],
+            total_amount: newInvoice.totalAmount,
+            status: 'AGENDADO',
+            invoice_id: invData.id,
+            scheduled_at: newInvoice.scheduledAt,
+            schedule_slot_id: newInvoice.scheduleSlotId,
+            schedule_calendar_id: newInvoice.scheduleCalendarId
+          }]);
+        
+        if (orderError) throw orderError;
+
+        // 2. Incrementar contagem no slot
+        const slot = scheduleSlots.find(s => s.id === newInvoice.scheduleSlotId);
+        if (slot) {
+          await supabase
+            .from('schedule_slots')
+            .update({ current_bookings: slot.currentBookings + 1 })
+            .eq('id', newInvoice.scheduleSlotId);
+        }
+
+        await loadOrders();
+        await loadScheduleData();
+      }
+
       await loadInvoices();
     } catch (err) {
       console.error('Erro ao adicionar fatura:', err);
@@ -1319,138 +1482,140 @@ function MandaPixApp() {
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
       
       {/* SIDEBAR NAVIGATION (Desktop) */}
-      <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white min-h-screen flex-shrink-0 z-20 shadow-xl">
-        <div className="p-6 border-b border-slate-800/60 flex items-center gap-2.5">
-          <div className="p-2 bg-pix rounded-xl text-white shadow-md shadow-pix/20">
-            <svg viewBox="0 0 135 135" className="w-5 h-5 fill-white" xmlns="http://www.w3.org/2000/svg">
-              <path d="M67.5 0L135 67.5L67.5 135L0 67.5L67.5 0Z" />
-              <path d="M67.5 23.5L111.5 67.5L67.5 111.5L23.5 67.5L67.5 23.5Z" className="text-slate-900/30" />
-              <path d="M67.5 45L90 67.5L67.5 90L45 67.5L67.5 45Z" />
-            </svg>
+      {!isDirectEmployee && (
+        <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white min-h-screen flex-shrink-0 z-20 shadow-xl">
+          <div className="p-6 border-b border-slate-800/60 flex items-center gap-2.5">
+            <div className="p-2 bg-pix rounded-xl text-white shadow-md shadow-pix/20">
+              <svg viewBox="0 0 135 135" className="w-5 h-5 fill-white" xmlns="http://www.w3.org/2000/svg">
+                <path d="M67.5 0L135 67.5L67.5 135L0 67.5L67.5 0Z" />
+                <path d="M67.5 23.5L111.5 67.5L67.5 111.5L23.5 67.5L67.5 23.5Z" className="text-slate-900/30" />
+                <path d="M67.5 45L90 67.5L67.5 90L45 67.5L67.5 45Z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="font-extrabold text-lg tracking-tight text-white leading-none">MandaPIX</h1>
+              <span className="text-[10px] text-pix uppercase tracking-widest font-black">ERP Autônomo</span>
+            </div>
           </div>
-          <div>
-            <h1 className="font-extrabold text-lg tracking-tight text-white leading-none">MandaPIX</h1>
-            <span className="text-[10px] text-pix uppercase tracking-widest font-black">ERP Autônomo</span>
-          </div>
-        </div>
 
-        {/* Logged in User Profile Info (Desktop) */}
-        <div className="px-6 py-4 border-b border-slate-800/40 flex flex-col gap-2 bg-slate-900/20">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 truncate">
-              {activeEmployee ? (
-                <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
-                  {activeEmployee.name.charAt(0)}
-                </div>
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
-                  {firstName.charAt(0)}
-                </div>
-              )}
-              <div className="truncate">
+          {/* Logged in User Profile Info (Desktop) */}
+          <div className="px-6 py-4 border-b border-slate-800/40 flex flex-col gap-2 bg-slate-900/20">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 truncate">
                 {activeEmployee ? (
-                  <>
-                    <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">{activeEmployee.role}</p>
-                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{activeEmployee.name}</p>
-                  </>
+                  <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                    {activeEmployee.name.charAt(0)}
+                  </div>
                 ) : (
-                  <>
-                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
-                    <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
-                  </>
+                  <div className="w-8 h-8 rounded-full bg-pix/10 border border-pix/20 text-pix flex items-center justify-center font-bold text-xs uppercase shadow-inner flex-shrink-0">
+                    {firstName.charAt(0)}
+                  </div>
                 )}
+                <div className="truncate">
+                  {activeEmployee ? (
+                    <>
+                      <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">{activeEmployee.role}</p>
+                      <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{activeEmployee.name}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Olá, bem-vindo(a)</p>
+                      <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{firstName}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+              {activeEmployee ? (
+                <button
+                  onClick={() => {
+                    if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
+                      setActiveEmployee(null);
+                    }
+                  }}
+                  className="p-2 bg-amber-500/10 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-amber-500 transition-all active:scale-95 flex-shrink-0"
+                  title="Sair do Perfil de Funcionário"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleLogout}
+                  className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0 animate-fade-in"
+                  title="Sair da Conta"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+          </div>
+
+          {/* Navigation Menu */}
+          <nav className="flex-1 px-4 py-6 space-y-1">
+            {visibleMenuItems.map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => { setActiveTab(item.id); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
+                    isActive 
+                      ? 'bg-pix text-white shadow-md shadow-pix/10' 
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Footer info in sidebar */}
+          {primaryKey && (
+            <div className="p-4 m-4 bg-slate-800/50 rounded-2xl border border-slate-800 flex items-center justify-between text-left">
+              <div className="truncate max-w-[140px]">
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Carteira Receptora</p>
+                <p className="text-xs font-bold text-white truncate mt-0.5">{primaryKey.label}</p>
+              </div>
+              <div className="w-6 h-6 rounded bg-pix/10 text-pix flex items-center justify-center font-bold text-[10px] uppercase">
+                {primaryKey.walletType === 'PIX'
+                  ? primaryKey.bankName.substring(0, 2)
+                  : primaryKey.walletType === 'CREDIT_CARD'
+                  ? 'CC'
+                  : 'CD'}
               </div>
             </div>
-            {activeEmployee ? (
-              <button
-                onClick={() => {
-                  if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
-                    setActiveEmployee(null);
-                  }
-                }}
-                className="p-2 bg-amber-500/10 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-amber-500 transition-all active:scale-95 flex-shrink-0"
-                title="Sair do Perfil de Funcionário"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={handleLogout}
-                className="p-2 bg-slate-800/40 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl text-slate-400 transition-all active:scale-95 flex-shrink-0 animate-fade-in"
-                title="Sair da Conta"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-        </div>
-
-        {/* Navigation Menu */}
-        <nav className="flex-1 px-4 py-6 space-y-1">
-          {visibleMenuItems.map(item => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => { setActiveTab(item.id); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-                  isActive 
-                    ? 'bg-pix text-white shadow-md shadow-pix/10' 
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-
-
-        {/* Footer info in sidebar */}
-        {primaryKey && (
-          <div className="p-4 m-4 bg-slate-800/50 rounded-2xl border border-slate-800 flex items-center justify-between text-left">
-            <div className="truncate max-w-[140px]">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Carteira Receptora</p>
-              <p className="text-xs font-bold text-white truncate mt-0.5">{primaryKey.label}</p>
-            </div>
-            <div className="w-6 h-6 rounded bg-pix/10 text-pix flex items-center justify-center font-bold text-[10px] uppercase">
-              {primaryKey.walletType === 'PIX'
-                ? primaryKey.bankName.substring(0, 2)
-                : primaryKey.walletType === 'CREDIT_CARD'
-                ? 'CC'
-                : 'CD'}
-            </div>
-          </div>
-        )}
-      </aside>
+          )}
+        </aside>
+      )}
 
       {/* MOBILE HEADER (Top Navigation) */}
-      <header className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between z-20 shadow-md">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-pix rounded-lg text-white">
-            <svg viewBox="0 0 135 135" className="w-4 h-4 fill-white" xmlns="http://www.w3.org/2000/svg">
-              <path d="M67.5 0L135 67.5L67.5 135L0 67.5L67.5 0Z" />
-              <path d="M67.5 23.5L111.5 67.5L67.5 111.5L23.5 67.5L67.5 23.5Z" className="text-slate-900/30" />
-              <path d="M67.5 45L90 67.5L67.5 90L45 67.5L67.5 45Z" />
-            </svg>
+      {!isDirectEmployee && (
+        <header className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between z-20 shadow-md">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-pix rounded-lg text-white">
+              <svg viewBox="0 0 135 135" className="w-4 h-4 fill-white" xmlns="http://www.w3.org/2000/svg">
+                <path d="M67.5 0L135 67.5L67.5 135L0 67.5L67.5 0Z" />
+                <path d="M67.5 23.5L111.5 67.5L67.5 111.5L23.5 67.5L67.5 23.5Z" className="text-slate-900/30" />
+                <path d="M67.5 45L90 67.5L67.5 90L45 67.5L67.5 45Z" />
+              </svg>
+            </div>
+            <h1 className="font-extrabold text-sm tracking-tight">MandaPIX ERP</h1>
           </div>
-          <h1 className="font-extrabold text-sm tracking-tight">MandaPIX ERP</h1>
-        </div>
-        
-        <button 
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-1.5 bg-slate-800 rounded-lg text-slate-300 hover:text-white"
-        >
-          {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </header>
+          
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-1.5 bg-slate-800 rounded-lg text-slate-300 hover:text-white"
+          >
+            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </header>
+      )}
 
       {/* Mobile Drawer (Overlay) */}
-      {isSidebarOpen && (
+      {isSidebarOpen && !isDirectEmployee && (
         <div className="md:hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-30 flex justify-end animate-fade-in">
           <div className="bg-slate-900 w-64 h-full p-6 flex flex-col justify-between text-white animate-slide-up">
             <div className="space-y-6">
@@ -1966,33 +2131,54 @@ function MandaPixApp() {
                         </div>
                       </div>
                       
-                      <select
-                        value={activeStoreId || ''}
-                        disabled={!!activeEmployee}
-                        onChange={(e) => {
-                          setActiveStoreId(e.target.value);
-                          const defaultTab = activeBranch?.config?.main_screen || 'orders';
-                          setActiveSubTab(defaultTab as any);
-                        }}
-                        className={`text-xs font-bold text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none ${
-                          activeEmployee ? 'bg-slate-100 cursor-not-allowed opacity-70' : 'bg-slate-50'
-                        }`}
-                      >
-                        {stores.map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
+                      {isDirectEmployee ? (
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner">
+                              {activeEmployee?.name.charAt(0)}
+                            </div>
+                            <div className="text-left">
+                              <p className="text-xs font-bold text-slate-800 leading-none">{activeEmployee?.name}</p>
+                              <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider mt-0.5 block">{activeEmployee?.role === 'GERENTE' ? 'Gerente' : activeEmployee?.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={handleLogout}
+                            className="p-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 rounded-xl text-slate-500 border border-slate-200 transition-all active:scale-95 flex-shrink-0"
+                            title="Sair da Conta"
+                          >
+                            <LogOut className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          value={activeStoreId || ''}
+                          disabled={!!activeEmployee}
+                          onChange={(e) => {
+                            setActiveStoreId(e.target.value);
+                            const defaultTab = activeBranch?.config?.main_screen || 'orders';
+                            setActiveSubTab(defaultTab as any);
+                          }}
+                          className={`text-xs font-bold text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none ${
+                            activeEmployee ? 'bg-slate-100 cursor-not-allowed opacity-70' : 'bg-slate-50'
+                          }`}
+                        >
+                          {stores.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
 
                     <div className="flex px-5 bg-white overflow-x-auto">
                       {([
                         { id: 'pdv', label: 'PDV Rápido', icon: Barcode },
-                        { id: 'orders', label: 'Pedidos', icon: ShoppingCart },
-                        { id: 'invoices', label: 'Gerenciar vendas', icon: History },
-                        { id: 'clients', label: 'Clientes', icon: Users },
-                        { id: 'catalogs', label: 'Catálogos', icon: FolderOpen },
-                        { id: 'schedule', label: 'Agendamento', icon: CalendarClock },
-                        { id: 'employees', label: 'Funcionários', icon: UserCheck },
+                        { id: 'orders', label: isClinica ? 'Consultas' : 'Pedidos', icon: ShoppingCart },
+                        { id: 'invoices', label: isClinica ? 'Faturamento' : 'Gerenciar vendas', icon: History },
+                        { id: 'clients', label: isClinica ? 'Pacientes' : 'Clientes', icon: Users },
+                        { id: 'catalogs', label: isClinica ? 'Procedimentos' : 'Catálogos', icon: FolderOpen },
+                        { id: 'schedule', label: isClinica ? 'Agenda Médica' : 'Agendamento', icon: CalendarClock },
+                        { id: 'employees', label: isClinica ? 'Médicos & Equipe' : 'Funcionários', icon: UserCheck },
                         { id: 'ecommerce', label: 'E-commerce', icon: Globe },
                         { id: 'cobranças', label: 'Cobranças', icon: DollarSign }
                       ] as const)
@@ -2003,7 +2189,7 @@ function MandaPixApp() {
                             } else if (activeEmployee.role === 'VENDEDOR') {
                               if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
                             } else if (activeEmployee.role === 'ATENDENTE') {
-                              if (!['orders', 'schedule'].includes(subTab.id)) return false;
+                              if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(subTab.id)) return false;
                             }
                           }
                           if (!activeBranch) return true;
@@ -2053,13 +2239,14 @@ function MandaPixApp() {
                   />
                 )}
 
-                {activeSubTab === 'orders' && (
+                 {activeSubTab === 'orders' && (
                   <OrderManager
                     orders={orders.filter(o => o.storeId === activeStoreId)}
                     invoices={invoices.filter(inv => inv.storeId === activeStoreId)}
                     onCancelOrder={handleCancelOrder}
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     activeBranch={activeBranch}
+                    isClinica={isClinica}
                   />
                 )}
 
@@ -2081,6 +2268,8 @@ function MandaPixApp() {
                     onNavigateToClients={() => setActiveSubTab('clients')}
                     routingSettings={routingSettings}
                     ecommerceSettings={ecommerceSettings}
+                    scheduleSlots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
+                    scheduleCalendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
                   />
                 )}
 
@@ -2091,6 +2280,8 @@ function MandaPixApp() {
                     onAddClient={(client) => handleAddClient({ ...client, storeId: activeStoreId! })}
                     onEditClient={handleEditClient}
                     onDeleteClient={handleDeleteClient}
+                    isClinica={isClinica}
+                    activeEmployee={activeEmployee}
                   />
                 )}
 
@@ -2124,6 +2315,7 @@ function MandaPixApp() {
                     onAddBulkSlots={handleAddBulkScheduleSlots}
                     onDeleteSlot={handleDeleteScheduleSlot}
                     onToggleSlot={handleToggleScheduleSlot}
+                    isClinica={isClinica}
                   />
                 )}
 
@@ -2281,7 +2473,7 @@ function MandaPixApp() {
                     } else if (emp.role === 'VENDEDOR') {
                       if (!['pdv', 'orders', 'schedule'].includes(activeSubTab)) allowed = false;
                     } else if (emp.role === 'ATENDENTE') {
-                      if (!['orders', 'schedule'].includes(activeSubTab)) allowed = false;
+                      if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(activeSubTab)) allowed = false;
                     }
                     if (!allowed) {
                       setActiveSubTab('orders');

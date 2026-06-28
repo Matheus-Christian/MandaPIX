@@ -93,6 +93,8 @@ export const AdminDashboard: React.FC = () => {
   const [editTenantRamoEmpresa, setEditTenantRamoEmpresa] = useState('varejo');
   const [editTenantError, setEditTenantError] = useState('');
   const [isSavingTenant, setIsSavingTenant] = useState(false);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [modalTab, setModalTab] = useState<'info' | 'employees'>('info');
 
   // Form Ramos
   const [branchId, setBranchId] = useState<string | null>(null);
@@ -294,7 +296,7 @@ export const AdminDashboard: React.FC = () => {
       if (plansErr) throw plansErr;
       setPlans(plansData || []);
 
-      // 2. Carregar perfis com planos associados
+      // 2. Carregar perfis com planos associados e os funcionários
       const { data: profilesData, error: profilesErr } = await supabase
         .from('profiles')
         .select(`
@@ -306,21 +308,33 @@ export const AdminDashboard: React.FC = () => {
         .order('created_at', { ascending: false });
       if (profilesErr) throw profilesErr;
 
-      // Cast para o tipo correto para calar o TypeScript
-      const formattedProfiles = (profilesData || []).map((p: any) => ({
-        id: p.id,
-        email: p.email,
-        role: p.role,
-        subscription_status: p.subscription_status,
-        created_at: p.created_at,
-        subscription_plan_id: p.subscription_plan_id,
-        trade_name: p.trade_name,
-        legal_name: p.legal_name,
-        document: p.document,
-        phone: p.phone,
-        ramo_empresa: p.ramo_empresa,
-        subscription_plans: p.subscription_plans ? p.subscription_plans : undefined
-      }));
+      // Carrega os funcionários cadastrados
+      const { data: employeesData, error: employeesErr } = await supabase
+        .from('employees')
+        .select('*');
+      
+      const allEmployees = employeesData || [];
+      setEmployees(allEmployees);
+
+      const employeeEmails = new Set(allEmployees.map((e: any) => e.email.toLowerCase()));
+
+      // Cast para o tipo correto para calar o TypeScript e filtra funcionários
+      const formattedProfiles = (profilesData || [])
+        .filter((p: any) => !employeeEmails.has(p.email.toLowerCase()))
+        .map((p: any) => ({
+          id: p.id,
+          email: p.email,
+          role: p.role,
+          subscription_status: p.subscription_status,
+          created_at: p.created_at,
+          subscription_plan_id: p.subscription_plan_id,
+          trade_name: p.trade_name,
+          legal_name: p.legal_name,
+          document: p.document,
+          phone: p.phone,
+          ramo_empresa: p.ramo_empresa,
+          subscription_plans: p.subscription_plans ? p.subscription_plans : undefined
+        }));
 
       setTenants(formattedProfiles);
 
@@ -336,7 +350,8 @@ export const AdminDashboard: React.FC = () => {
         setBranches([
           { id: 'b-varejo', key: 'varejo', name: 'Varejo / Conveniência / Loja Física', initial_trigger: 'Produto / Código de Barras', focus: 'Velocidade de fechamento no caixa e controle de estoque', order_status_flow: ['REGISTRO_ITENS', 'PAGAMENTO_PIX', 'VENDA_CONCLUIDA'], config: { hide_agenda: true, hide_kitchen: true, main_screen: 'pdv' } },
           { id: 'b-servicos', key: 'servicos', name: 'Serviços / Salão de Beleza / Clínicas / Estética', initial_trigger: 'Tempo / Horário (Agenda)', focus: 'Gestão de horários, ocupação de profissionais e comissões/repasses', order_status_flow: ['PENDENTE', 'AGENDADO', 'EM_ATENDIMENTO', 'PAGAMENTO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } },
-          { id: 'b-alimentacao', key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', initial_trigger: 'Pedido (Cardápio Digital ou Balcão)', focus: 'Comunicação entre recepção, produção (cozinha) e entrega', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } }
+          { id: 'b-alimentacao', key: 'alimentacao', name: 'Alimentação / Lanches / Delivery / Restaurantes', initial_trigger: 'Pedido (Cardápio Digital ou Balcão)', focus: 'Comunicação entre recepção, produção (cozinha) e entrega', order_status_flow: ['ENTRADA_PEDIDO', 'CONFIRMACAO_PAGAMENTO', 'PRODUCAO_COZINHA', 'LOGISTICA_ENVIO', 'PEDIDO_ENTREGUE'], config: { hide_agenda: true, main_screen: 'orders' } },
+          { id: 'b-clinica', key: 'clinica', name: 'Clínicas Médicas / Consultórios', initial_trigger: 'Consulta / Agendamento', focus: 'Gestão de prontuários, consultas, atestados médicos e agendamentos', order_status_flow: ['PENDENTE', 'CONFIRMADO', 'EM_ATENDIMENTO', 'ATENDIDO', 'CANCELADO'], config: { hide_delivery: true, hide_kitchen: true, main_screen: 'schedule' } }
         ]);
       } else {
         setBranches(branchesData || []);
@@ -447,6 +462,7 @@ export const AdminDashboard: React.FC = () => {
     setEditSubscriptionStatus(tenant.subscription_status || 'active');
     setEditTenantRamoEmpresa(tenant.ramo_empresa || 'varejo');
     setEditTenantError('');
+    setModalTab('info');
     setIsEditTenantModalOpen(true);
   };
 
@@ -882,8 +898,12 @@ export const AdminDashboard: React.FC = () => {
                     <tbody className="divide-y divide-slate-800/60">
                       {tenants.map(t => (
                         <tr key={t.id} className="hover:bg-slate-800/20 text-slate-300">
-                          <td className="py-3.5 pr-4">
-                            <div className="font-bold text-slate-200">
+                          <td 
+                            className="py-3.5 pr-4 cursor-pointer select-none group" 
+                            onClick={() => handleEditTenant(t)}
+                            title="Clique para ver detalhes e usuários"
+                          >
+                            <div className="font-bold text-slate-200 group-hover:text-teal-400 transition-colors">
                               {t.trade_name || 'Sem Nome Fantasia'}
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5 leading-none">
@@ -1537,109 +1557,182 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleSaveTenantEdit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Nome Fantasia</label>
-                  <input 
-                    type="text"
-                    placeholder="Ex: Minha Empresa"
-                    value={editTradeName}
-                    onChange={(e) => setEditTradeName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
-                  />
-                </div>
+            {/* Tabs inside modal */}
+            <div className="flex border-b border-slate-800 mb-6">
+              <button
+                type="button"
+                onClick={() => setModalTab('info')}
+                className={`flex-1 pb-2.5 text-xs font-bold transition-all border-b-2 uppercase tracking-wider ${
+                  modalTab === 'info' 
+                    ? 'border-teal-500 text-teal-400' 
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Informações Gerais
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTab('employees')}
+                className={`flex-1 pb-2.5 text-xs font-bold transition-all border-b-2 uppercase tracking-wider ${
+                  modalTab === 'employees' 
+                    ? 'border-teal-500 text-teal-400' 
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Funcionários ({employees.filter(e => e.tenant_id === editingTenant.id).length})
+              </button>
+            </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Razão Social / Nome Jurídico</label>
-                  <input 
-                    type="text"
-                    placeholder="Ex: Minha Empresa LTDA"
-                    value={editLegalName}
-                    onChange={(e) => setEditLegalName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
-                  />
-                </div>
+            {modalTab === 'employees' ? (
+              <div className="space-y-4">
+                {(() => {
+                  const tenantEmployees = employees.filter(e => e.tenant_id === editingTenant.id);
+                  return tenantEmployees.length === 0 ? (
+                    <div className="text-center py-10 bg-slate-950/40 border border-slate-850 rounded-2xl text-slate-500">
+                      <p className="text-xs">Nenhum funcionário cadastrado para este tenant.</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[320px] overflow-y-auto space-y-2 pr-1.5 scrollbar-thin scrollbar-thumb-slate-800">
+                      {tenantEmployees.map((emp) => (
+                        <div key={emp.id} className="p-3.5 bg-slate-950/40 border border-slate-850 rounded-2xl flex items-center justify-between hover:border-slate-700 transition-colors">
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-slate-200">{emp.name}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">{emp.email}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="px-1.5 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/10 text-[8px] font-black uppercase rounded">
+                                {emp.role || 'VENDEDOR'}
+                              </span>
+                              <span className="text-[9px] text-slate-500 font-mono">
+                                PIN: {emp.access_code}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right text-[10px] text-slate-400 font-medium">
+                            {emp.phone ? (
+                              <p>{emp.phone}</p>
+                            ) : (
+                              <span className="text-slate-600">Sem telefone</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                <button
+                  type="button"
+                  onClick={() => { setIsEditTenantModalOpen(false); setEditingTenant(null); }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3.5 rounded-xl text-xs uppercase tracking-wider transition-all active:scale-98 mt-6"
+                >
+                  Fechar
+                </button>
               </div>
+            ) : (
+              <form onSubmit={handleSaveTenantEdit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Nome Fantasia</label>
+                    <input 
+                      type="text"
+                      placeholder="Ex: Minha Empresa"
+                      value={editTradeName}
+                      onChange={(e) => setEditTradeName(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">CPF/CNPJ</label>
-                  <input 
-                    type="text"
-                    placeholder="Ex: 00.000.000/0001-00"
-                    value={editDocument}
-                    onChange={(e) => setEditDocument(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Razão Social / Nome Jurídico</label>
+                    <input 
+                      type="text"
+                      placeholder="Ex: Minha Empresa LTDA"
+                      value={editLegalName}
+                      onChange={(e) => setEditLegalName(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">CPF/CNPJ</label>
+                    <input 
+                      type="text"
+                      placeholder="Ex: 00.000.000/0001-00"
+                      value={editDocument}
+                      onChange={(e) => setEditDocument(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Telefone / Contato</label>
+                    <input 
+                      type="text"
+                      placeholder="Ex: (11) 99999-9999"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Plano de Assinatura</label>
+                    <select
+                      value={editSelectedPlanId}
+                      onChange={(e) => setEditSelectedPlanId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="">Sem plano associado...</option>
+                      {plans.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} - R$ {p.price}/mês</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status do Acesso</label>
+                    <select
+                      value={editSubscriptionStatus}
+                      onChange={(e) => setEditSubscriptionStatus(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="active">Ativo (Acesso Liberado)</option>
+                      <option value="suspended">Suspenso (Acesso Bloqueado)</option>
+                      <option value="inactive">Inativo</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Telefone / Contato</label>
-                  <input 
-                    type="text"
-                    placeholder="Ex: (11) 99999-9999"
-                    value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Plano de Assinatura</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Ramo de Atuação</label>
                   <select
-                    value={editSelectedPlanId}
-                    onChange={(e) => setEditSelectedPlanId(e.target.value)}
+                    value={editTenantRamoEmpresa}
+                    onChange={(e) => setEditTenantRamoEmpresa(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
                   >
-                    <option value="">Sem plano associado...</option>
-                    {plans.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} - R$ {p.price}/mês</option>
+                    {branches.map(b => (
+                      <option key={b.key} value={b.key}>{b.name}</option>
                     ))}
                   </select>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status do Acesso</label>
-                  <select
-                    value={editSubscriptionStatus}
-                    onChange={(e) => setEditSubscriptionStatus(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
-                  >
-                    <option value="active">Ativo (Acesso Liberado)</option>
-                    <option value="suspended">Suspenso (Acesso Bloqueado)</option>
-                    <option value="inactive">Inativo</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Ramo de Atuação</label>
-                <select
-                  value={editTenantRamoEmpresa}
-                  onChange={(e) => setEditTenantRamoEmpresa(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none focus:border-teal-500"
+                <button
+                  type="submit"
+                  disabled={isSavingTenant}
+                  className="w-full bg-teal-500 hover:bg-teal-600 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-55 mt-4"
                 >
-                  {branches.map(b => (
-                    <option key={b.key} value={b.key}>{b.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSavingTenant}
-                className="w-full bg-teal-500 hover:bg-teal-600 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-55 mt-4"
-              >
-                {isSavingTenant ? (
-                  <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
-                ) : (
-                  <span>Salvar Alterações</span>
-                )}
-              </button>
-            </form>
+                  {isSavingTenant ? (
+                    <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <span>Salvar Alterações</span>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

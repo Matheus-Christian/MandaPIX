@@ -17,6 +17,7 @@ interface OrderManagerProps {
   ) => void;
   activeBranch?: any;
   products?: ProductService[];
+  isClinica?: boolean;
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
@@ -26,7 +27,8 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   onUpdateOrderStatus,
   onUpdateInstallmentStatus,
   activeBranch,
-  products
+  products,
+  isClinica = false
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -251,6 +253,13 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
   const formatStatusLabel = (status: string) => {
     const upper = status.toUpperCase();
+    if (isClinica) {
+      if (upper === 'PENDENTE') return 'Agendada';
+      if (upper === 'CONFIRMADO') return 'Paciente Aguardando';
+      if (upper === 'EM_ATENDIMENTO') return 'Em Consulta';
+      if (upper === 'ATENDIDO') return 'Concluída';
+      if (upper === 'CANCELADO') return 'Cancelada';
+    }
     if (upper === 'PENDENTE') return 'Aguardando pagamento';
     if (upper === 'AGENDADO') return 'Agendado';
     if (upper === 'EM_ATENDIMENTO') return 'Em atendimento';
@@ -264,6 +273,11 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   const getNextActionLabel = (nextStatus: string) => {
     if (!nextStatus) return '';
     const upper = nextStatus.toUpperCase();
+    if (isClinica) {
+      if (upper === 'CONFIRMADO') return 'Paciente Chegou';
+      if (upper === 'EM_ATENDIMENTO') return 'Iniciar Consulta';
+      if (upper === 'ATENDIDO') return 'Concluir Consulta';
+    }
     if (upper === 'APROVADO') return 'Aprovar';
     if (upper === 'PREPARACAO') return 'Preparar';
     if (upper === 'A_CAMINHO') return 'Despachar';
@@ -280,10 +294,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   const getStatusBadgeClass = (status: string) => {
     const upper = status.toUpperCase();
     if (upper === 'PENDENTE' || upper === 'AGENDAMENTO') return 'bg-amber-50 text-amber-700 border-amber-100';
-    if (upper === 'APROVADO' || upper === 'CHECK_IN' || upper === 'AGENDADO') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+    if (upper === 'APROVADO' || upper === 'CHECK_IN' || upper === 'AGENDADO' || upper === 'CONFIRMADO') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
     if (upper === 'PREPARACAO' || upper === 'CHECKOUT' || upper === 'EM_ATENDIMENTO') return 'bg-purple-50 text-purple-700 border-purple-100';
     if (upper === 'A_CAMINHO' || upper === 'PAGAMENTO') return 'bg-sky-50 text-sky-700 border-sky-100';
-    if (upper === 'ENTREGUE' || upper === 'DIVISAO_COMISSAO' || upper === 'VENDA_CONCLUIDA' || upper === 'PEDIDO_ENTREGUE') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+    if (upper === 'ENTREGUE' || upper === 'DIVISAO_COMISSAO' || upper === 'VENDA_CONCLUIDA' || upper === 'PEDIDO_ENTREGUE' || upper === 'ATENDIDO') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if (upper === 'CANCELADO') return 'bg-red-50 text-red-700 border-red-100';
     return 'bg-slate-50 text-slate-700 border-slate-100';
   };
@@ -353,12 +367,12 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
             ) : (
               <CalendarDays className="w-6 h-6 text-pix" />
             )}
-            {viewMode === 'PDV' ? (pdvSubMode === 'LIST' ? 'Histórico de Pedidos' : 'Painel KDS / Fluxo') : 'Agenda de Pedidos'}
+            {viewMode === 'PDV' ? (pdvSubMode === 'LIST' ? (isClinica ? 'Histórico de Consultas' : 'Histórico de Pedidos') : (isClinica ? 'Painel de Atendimento / Esteira' : 'Painel KDS / Fluxo')) : (isClinica ? 'Agenda de Consultas' : 'Agenda de Pedidos')}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             {viewMode === 'PDV' 
-              ? (pdvSubMode === 'LIST' ? 'Acompanhe e gerencie todos os pedidos em formato de lista' : 'Acompanhe a esteira de produção e andamento dos seus pedidos')
-              : 'Visualize os pedidos com agendamento direto em formato de calendário semanal'}
+              ? (pdvSubMode === 'LIST' ? (isClinica ? 'Acompanhe e gerencie todas as consultas em formato de lista' : 'Acompanhe e gerencie todos os pedidos em formato de lista') : (isClinica ? 'Acompanhe a esteira de atendimento e andamento das suas consultas' : 'Acompanhe a esteira de produção e andamento dos seus pedidos'))
+              : (isClinica ? 'Visualize as consultas com agendamento direto em formato de calendário semanal' : 'Visualize os pedidos com agendamento direto em formato de calendário semanal')}
           </p>
         </div>
 
@@ -432,7 +446,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Total Pedidos</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">{isClinica ? 'Total Consultas' : 'Total Pedidos'}</span>
                   <h3 className="text-xl font-black text-slate-800">{totalCount}</h3>
                 </div>
                 <div className="p-2 bg-slate-50 text-slate-400 rounded-xl">
@@ -442,7 +456,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Pendentes</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">{isClinica ? 'Agendadas' : 'Pendentes'}</span>
                   <h3 className="text-xl font-black text-slate-800">{pendenteCount}</h3>
                 </div>
                 <div className="p-2 bg-amber-50 text-amber-500 rounded-xl">
@@ -452,7 +466,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Preparação / Envio</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">{isClinica ? 'Em Atendimento' : 'Preparação / Envio'}</span>
                   <h3 className="text-xl font-black text-slate-850 text-indigo-650">{emAndamentoCount}</h3>
                 </div>
                 <div className="p-2 bg-indigo-50 text-indigo-500 rounded-xl">
@@ -462,7 +476,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Entregues</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">{isClinica ? 'Concluídas' : 'Entregues'}</span>
                   <h3 className="text-xl font-black text-slate-800 text-emerald-650">{entregueCount}</h3>
                 </div>
                 <div className="p-2 bg-emerald-50 text-emerald-550 rounded-xl">
@@ -478,7 +492,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar por nº pedido, cliente ou documento..."
+                  placeholder={isClinica ? "Buscar por nº consulta, paciente ou documento..." : "Buscar por nº pedido, cliente ou documento..."}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 text-sm border-none bg-transparent text-slate-800 focus:outline-none"
@@ -511,11 +525,11 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
             {filteredOrders.length === 0 ? (
               <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center flex flex-col items-center justify-center shadow-sm">
                 <ShoppingCart className="w-12 h-12 text-slate-300 mb-3" />
-                <h4 className="font-bold text-slate-700 text-sm">Nenhum pedido encontrado</h4>
+                <h4 className="font-bold text-slate-700 text-sm">{isClinica ? 'Nenhuma consulta encontrada' : 'Nenhum pedido encontrado'}</h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-[280px]">
                   {search || statusFilter !== 'ALL' 
                     ? 'Nenhum resultado corresponde aos filtros selecionados.' 
-                    : 'Seus clientes ainda não geraram pedidos a partir do Catálogo Online.'}
+                    : (isClinica ? 'Seus pacientes ainda não realizaram agendamentos online.' : 'Seus clientes ainda não geraram pedidos a partir do Catálogo Online.')}
                 </p>
               </div>
             ) : (
@@ -524,8 +538,8 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
-                        <th className="py-3 px-4">Pedido</th>
-                        <th className="py-3 px-4">Cliente</th>
+                        <th className="py-3 px-4">{isClinica ? 'Consulta' : 'Pedido'}</th>
+                        <th className="py-3 px-4">{isClinica ? 'Paciente' : 'Cliente'}</th>
                         <th className="py-3 px-4">Data</th>
                         <th className="py-3 px-4">Agendado para</th>
                         <th className="py-3 px-4">Total</th>
@@ -612,7 +626,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Buscar por nº pedido ou cliente no KDS..."
+                placeholder={isClinica ? "Buscar por nº consulta ou paciente no painel..." : "Buscar por nº pedido ou cliente no KDS..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 text-sm border-none bg-transparent text-slate-800 focus:outline-none"
@@ -841,7 +855,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 flex items-center justify-between">
               <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-1.5">
-                <ShoppingCart className="w-5 h-5 text-pix" /> Detalhes do Pedido #{selectedOrder.orderNumber}
+                <ShoppingCart className="w-5 h-5 text-pix" /> {isClinica ? 'Detalhes da Consulta' : 'Detalhes do Pedido'} #{selectedOrder.orderNumber}
               </h3>
               <button
                 onClick={() => setSelectedOrder(null)}
@@ -857,7 +871,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
               <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
                 <div className="space-y-1">
                   <span className="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" /> Data do Pedido
+                    <Calendar className="w-3.5 h-3.5" /> {isClinica ? 'Data da Consulta' : 'Data do Pedido'}
                   </span>
                   <p className="text-xs font-bold text-slate-700">
                     {new Date(selectedOrder.dateCreated).toLocaleDateString('pt-BR')} às {new Date(selectedOrder.dateCreated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -882,7 +896,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     <CalendarClock className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <p className="text-[9px] font-black text-pix uppercase tracking-wide">Pedido Agendado</p>
+                    <p className="text-[9px] font-black text-pix uppercase tracking-wide">{isClinica ? 'Consulta Agendada' : 'Pedido Agendado'}</p>
                     <p className="text-xs font-bold text-slate-800 mt-0.5">
                       {parseScheduledDate(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
                     </p>
@@ -994,7 +1008,10 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     {/* Cancel action */}
                     <button
                       onClick={() => {
-                        if (confirm(`Deseja realmente cancelar o pedido #${selectedOrder.orderNumber}?`)) {
+                        const confirmText = isClinica 
+                          ? `Deseja realmente cancelar esta consulta?`
+                          : `Deseja realmente cancelar o pedido #${selectedOrder.orderNumber}?`;
+                        if (confirm(confirmText)) {
                           onCancelOrder(selectedOrder.id);
                           onUpdateOrderStatus(selectedOrder.id, 'CANCELADO');
                           setSelectedOrder(prev => prev ? { ...prev, status: 'CANCELADO' } : null);
@@ -1020,7 +1037,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               {/* Client Info */}
               <div className="space-y-2.5">
-                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Informações do Cliente</h4>
+                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{isClinica ? 'Informações do Paciente' : 'Informações do Cliente'}</h4>
                 <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm space-y-2 text-xs">
                   <div className="flex items-center gap-2 text-slate-650">
                     <User className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -1040,7 +1057,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               {/* Cart Items */}
               <div className="space-y-2.5">
-                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Itens do Pedido</h4>
+                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{isClinica ? 'Procedimentos/Serviços' : 'Itens do Pedido'}</h4>
                 <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
                   <div className="p-4 divide-y divide-slate-50 max-h-[200px] overflow-y-auto text-xs space-y-3">
                     {selectedOrder.items.map((item, idx) => (
@@ -1058,7 +1075,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     ))}
                   </div>
                   <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span className="uppercase">Valor Total do Pedido</span>
+                    <span className="uppercase">{isClinica ? 'Valor Total da Consulta' : 'Valor Total do Pedido'}</span>
                     <span className="text-base text-pix font-black">{formatBRL(selectedOrder.totalAmount)}</span>
                   </div>
                 </div>

@@ -23,7 +23,9 @@ import {
   UserCheck,
   Package,
   Landmark,
-  Settings
+  Settings,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -44,7 +46,7 @@ import { ClientManager } from './components/ClientManager';
 import { CatalogManager } from './components/CatalogManager';
 import { InvoiceManager } from './components/InvoiceManager';
 import { SavedKeys } from './components/SavedKeys';
-import { StoreManager } from './components/StoreManager';
+import { StoreSettings } from './components/StoreSettings';
 import { OrderManager } from './components/OrderManager';
 import { EcommerceManager } from './components/EcommerceManager';
 import { ScheduleManager } from './components/ScheduleManager';
@@ -149,13 +151,35 @@ function MandaPixApp() {
 
   const [activeBranch, setActiveBranch] = useState<any>(null);
   const isClinica = activeBranch?.key === 'clinica';
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stores' | 'wallets'>(() => {
+    const saved = localStorage.getItem('mandapix_active_tab');
+    return (saved as any) || 'dashboard';
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'employees' | 'ecommerce' | 'cobranças' | 'stock' | 'cashflow' | 'fiscal'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'employees' | 'ecommerce' | 'cobranças' | 'stock' | 'cashflow' | 'fiscal' | 'store_settings'>(() => {
+    const saved = localStorage.getItem('mandapix_active_subtab');
+    return (saved as any) || 'orders';
+  });
+  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('mandapix_expanded_modules');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return {
+      vendas_catalogo: true,
+      clientes_agenda: false,
+      financeiro_fiscal: false,
+      gestao_loja: false
+    };
+  });
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
@@ -217,6 +241,18 @@ function MandaPixApp() {
       setEcommerceSettings(null);
     }
   }, [activeStoreId]);
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_active_subtab', activeSubTab);
+  }, [activeSubTab]);
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_expanded_modules', JSON.stringify(expandedModules));
+  }, [expandedModules]);
 
   // Estados de Carregamento
   const [loadingData, setLoadingData] = useState(true);
@@ -409,7 +445,39 @@ function MandaPixApp() {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: true });
     if (error) throw error;
-    setStores(data || []);
+
+    if (!data || data.length === 0) {
+      // Auto-create a default store
+      const defaultStore = {
+        name: 'Minha Loja',
+        description: 'Loja padrão pré-configurada.',
+        color: 'from-slate-600 to-blue-700',
+        legal_name: '',
+        document: '',
+        email: '',
+        contact: '',
+        address: '',
+        tenant_id: tenantId
+      };
+      
+      const { data: insertedData, error: insertError } = await supabase
+        .from('stores')
+        .insert([defaultStore])
+        .select('*');
+        
+      if (insertError) {
+        console.error('Erro ao criar loja padrão:', insertError);
+        setStores([]);
+      } else if (insertedData && insertedData.length > 0) {
+        setStores(insertedData);
+        setActiveStoreId(insertedData[0].id);
+      }
+    } else {
+      setStores(data);
+      if (data.length > 0) {
+        setActiveStoreId(data[0].id);
+      }
+    }
   };
   const loadClients = async (tenantId = currentTenantId) => {
     if (!tenantId) return;
@@ -1703,7 +1771,7 @@ function MandaPixApp() {
 
   const menuItems = [
     { id: 'dashboard', label: 'Painel', icon: Home },
-    { id: 'stores', label: 'Lojas', icon: ShoppingBag },
+    { id: 'stores', label: 'Loja', icon: ShoppingBag },
     { id: 'wallets', label: 'Carteiras', icon: WalletIcon }
   ] as const;
 
@@ -1713,6 +1781,134 @@ function MandaPixApp() {
         : menuItems.filter(item => item.id === 'stores')
       )
     : menuItems;
+
+  const renderStoreSubmenu = (isMobile: boolean) => {
+    const getFilteredSubtabs = (subtabs: any[]) => {
+      return subtabs.filter(subTab => {
+        if (activeEmployee) {
+          if (activeEmployee.role === 'GERENTE') {
+            if (['ecommerce', 'cobranças', 'fiscal', 'store_settings'].includes(subTab.id)) return false;
+          } else if (activeEmployee.role === 'VENDEDOR') {
+            if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
+          } else if (activeEmployee.role === 'ATENDENTE') {
+            if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(subTab.id)) return false;
+          }
+        }
+        if (!activeBranch) return true;
+        if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
+        if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
+        return true;
+      });
+    };
+
+    const modules = [
+      {
+        id: 'vendas_catalogo',
+        name: 'Vendas e Catálogos',
+        subtabs: [
+          ...(activeBranch?.key === 'varejo' ? [{ id: 'pdv', label: 'PDV Rápido' }] : []),
+          { id: 'orders', label: isClinica ? 'Consultas' : 'Pedidos' },
+          { id: 'invoices', label: isClinica ? 'Faturamento' : 'Gerenciar Vendas' },
+          { id: 'catalogs', label: isClinica ? 'Procedimentos' : 'Catálogos' },
+          { id: 'stock', label: 'Estoque e Insumos' }
+        ]
+      },
+      {
+        id: 'clientes_agenda',
+        name: 'Clientes e Agenda',
+        subtabs: [
+          { id: 'schedule', label: isClinica ? 'Agenda Médica' : 'Agenda' },
+          { id: 'clients', label: isClinica ? 'Pacientes' : 'Clientes' }
+        ]
+      },
+      {
+        id: 'financeiro_fiscal',
+        name: 'Financeiro e Fiscal',
+        subtabs: [
+          { id: 'cobranças', label: 'Cobranças' },
+          { id: 'cashflow', label: 'Fluxo de Caixa' },
+          { id: 'fiscal', label: 'Painel MEI & Fiscal' }
+        ]
+      },
+      {
+        id: 'gestao_loja',
+        name: 'Gestão da Loja',
+        subtabs: [
+          { id: 'store_settings', label: 'Identificação' },
+          { id: 'employees', label: isClinica ? 'Médicos & Equipe' : 'Funcionários' },
+          { id: 'ecommerce', label: 'E-commerce' }
+        ]
+      }
+    ];
+
+    return (
+      <div className="pl-4 pr-1 py-1 flex flex-col gap-1 border-l border-slate-800 ml-5 mt-1 space-y-1 select-none">
+        {modules.map(module => {
+          const visibleSubtabs = getFilteredSubtabs(module.subtabs);
+          if (visibleSubtabs.length === 0) return null;
+
+          const isExpanded = !!expandedModules[module.id];
+          const isModuleActive = visibleSubtabs.some(sub => activeSubTab === sub.id);
+
+          return (
+            <div key={module.id} className="flex flex-col gap-0.5">
+              {/* Module Header */}
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedModules(prev => ({
+                    ...prev,
+                    [module.id]: !prev[module.id]
+                  }));
+                }}
+                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-left transition-all ${
+                  isModuleActive 
+                    ? 'text-[#4FD1C5] font-black' 
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <span>{module.name}</span>
+                {isExpanded ? (
+                  <ChevronDown className="w-3 h-3 text-slate-500" />
+                ) : (
+                  <ChevronRight className="w-3 h-3 text-slate-500" />
+                )}
+              </button>
+
+              {/* Module Subtabs (only if expanded) */}
+              {isExpanded && (
+                <div className="pl-2 flex flex-col gap-0.5 transition-all duration-200">
+                  {visibleSubtabs.map(subTab => {
+                    const isSubActive = activeSubTab === subTab.id;
+                    return (
+                      <button
+                        key={subTab.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveSubTab(subTab.id as any);
+                          setActiveTab('stores');
+                          if (isMobile) {
+                            setIsSidebarOpen(false);
+                          }
+                        }}
+                        className={`w-full text-left px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                          isSubActive
+                            ? 'bg-pix/15 text-[#4FD1C5] font-extrabold border-l-2 border-pix'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/20'
+                        }`}
+                      >
+                        {subTab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   if (loadingData) {
     return (
@@ -1802,6 +1998,33 @@ function MandaPixApp() {
             {visibleMenuItems.map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+
+              if (item.id === 'stores') {
+                return (
+                  <div key={item.id} className="flex flex-col gap-1 animate-fade-in">
+                    <button
+                      onClick={() => {
+                        setActiveTab('stores');
+                        setActiveSubTab('orders');
+                        setIsSidebarOpen(false);
+                        if (stores.length > 0) {
+                          setActiveStoreId(stores[0].id);
+                        }
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
+                        isActive 
+                          ? 'bg-pix text-white shadow-md shadow-pix/10' 
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </button>
+                    {isActive && renderStoreSubmenu(false)}
+                  </div>
+                );
+              }
+
               return (
                 <button
                   key={item.id}
@@ -1929,6 +2152,32 @@ function MandaPixApp() {
                 {visibleMenuItems.map(item => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
+
+                  if (item.id === 'stores') {
+                    return (
+                      <div key={item.id} className="flex flex-col gap-1">
+                        <button
+                          onClick={() => {
+                            setActiveTab('stores');
+                            setActiveSubTab('orders');
+                            if (stores.length > 0) {
+                              setActiveStoreId(stores[0].id);
+                            }
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-xs font-bold transition-all ${
+                            isActive 
+                              ? 'bg-pix text-white shadow-md' 
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span>{item.label}</span>
+                        </button>
+                        {isActive && renderStoreSubmenu(true)}
+                      </div>
+                    );
+                  }
+
                   return (
                     <button
                       key={item.id}
@@ -2334,232 +2583,52 @@ function MandaPixApp() {
           </div>
         )}
 
-        {activeTab === 'stores' && (
-          activeStoreId === null ? (
-            <StoreManager
-              stores={stores}
-              clients={clients}
-              catalogs={catalogs}
-              invoices={invoices}
-              onAddStore={handleAddStore}
-              onEditStore={handleEditStore}
-              onDeleteStore={handleDeleteStore}
-              onSelectStore={(id) => {
-                setActiveStoreId(id);
-                const defaultTab = activeBranch?.config?.main_screen || 'orders';
-                setActiveSubTab(defaultTab as any);
-              }}
-            />
-          ) : (
-            <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
-              {(() => {
-                const currentStore = stores.find(s => s.id === activeStoreId);
-                const colorGradient = currentStore?.color || 'from-blue-600 to-indigo-700';
-                
-                return (
-                  <div className="bg-white border-b border-slate-100 flex-shrink-0 flex flex-col">
-                    <div className="p-5 flex items-center justify-between border-b border-slate-50">
-                      <div className="flex items-center gap-3">
-                        {!activeEmployee && (
-                          <button
-                            onClick={() => setActiveStoreId(null)}
-                            className="p-1.5 text-slate-500 hover:text-slate-700 rounded-xl hover:bg-slate-100 border border-slate-100 transition-all active:scale-95"
-                            title="Voltar para Lojas"
-                          >
-                            <ArrowLeft className="w-5 h-5" />
-                          </button>
-                        )}
-                        <div>
-                          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold font-mono">Loja Ativa</span>
-                          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2 mt-0.5">
-                            <span className={`w-3.5 h-3.5 rounded bg-gradient-to-r ${colorGradient} inline-block shadow-sm`} />
-                            {currentStore?.name}
-                          </h2>
-                        </div>
+        {activeTab === 'stores' && activeStoreId && (
+          <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
+            {(() => {
+              const currentStore = stores.find(s => s.id === activeStoreId);
+              if (!currentStore) return null;
+              const colorGradient = currentStore.color || 'from-slate-600 to-blue-700';
+              
+              return (
+                <div className="bg-white border-b border-slate-100 flex-shrink-0 flex flex-col">
+                  <div className="p-5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold font-mono">Loja</span>
+                        <h2 className="text-xl font-black text-slate-800 flex items-center gap-2 mt-0.5">
+                          <span className={`w-3.5 h-3.5 rounded bg-gradient-to-r ${colorGradient} inline-block shadow-sm`} />
+                          {currentStore?.name}
+                        </h2>
                       </div>
-                      
-                      {isDirectEmployee ? (
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner">
-                              {activeEmployee?.name.charAt(0)}
-                            </div>
-                            <div className="text-left">
-                              <p className="text-xs font-bold text-slate-800 leading-none">{activeEmployee?.name}</p>
-                              <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider mt-0.5 block">{activeEmployee?.role === 'GERENTE' ? 'Gerente' : activeEmployee?.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'}</span>
-                            </div>
+                    </div>
+                    
+                    {isDirectEmployee ? (
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs uppercase shadow-inner">
+                            {activeEmployee?.name.charAt(0)}
                           </div>
-                          <button
-                            onClick={handleLogout}
-                            className="p-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 rounded-xl text-slate-500 border border-slate-200 transition-all active:scale-95 flex-shrink-0"
-                            title="Sair da Conta"
-                          >
-                            <LogOut className="w-4 h-4" />
-                          </button>
+                          <div className="text-left">
+                            <p className="text-xs font-bold text-slate-800 leading-none">{activeEmployee?.name}</p>
+                            <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider mt-0.5 block">{activeEmployee?.role === 'GERENTE' ? 'Gerente' : activeEmployee?.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'}</span>
+                          </div>
                         </div>
-                      ) : (
-                        <select
-                          value={activeStoreId || ''}
-                          disabled={!!activeEmployee}
-                          onChange={(e) => {
-                            setActiveStoreId(e.target.value);
-                            const defaultTab = activeBranch?.config?.main_screen || 'orders';
-                            setActiveSubTab(defaultTab as any);
-                          }}
-                          className={`text-xs font-bold text-slate-600 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none ${
-                            activeEmployee ? 'bg-slate-100 cursor-not-allowed opacity-70' : 'bg-slate-50'
-                          }`}
+                        <button
+                          onClick={handleLogout}
+                          className="p-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 rounded-xl text-slate-500 border border-slate-200 transition-all active:scale-95 flex-shrink-0"
+                          title="Sair da Conta"
                         >
-                          {stores.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-
-                    <div className="flex px-5 bg-white border-b border-slate-100 select-none relative overflow-visible z-20">
-                      {(() => {
-                        const getFilteredSubtabs = (subtabs: any[]) => {
-                          return subtabs.filter(subTab => {
-                            if (activeEmployee) {
-                              if (activeEmployee.role === 'GERENTE') {
-                                if (['ecommerce', 'cobranças', 'fiscal'].includes(subTab.id)) return false;
-                              } else if (activeEmployee.role === 'VENDEDOR') {
-                                if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
-                              } else if (activeEmployee.role === 'ATENDENTE') {
-                                if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(subTab.id)) return false;
-                              }
-                            }
-                            if (!activeBranch) return true;
-                            if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
-                            if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
-                            return true;
-                          });
-                        };
-
-                        const modules = [
-                          {
-                            id: 'vendas_catalogo',
-                            name: 'Vendas & Catálogo',
-                            icon: ShoppingBag,
-                            subtabs: [
-                              ...(activeBranch?.key === 'varejo' ? [{ id: 'pdv', label: 'PDV Rápido', icon: Barcode }] : []),
-                              { id: 'orders', label: isClinica ? 'Consultas' : 'Pedidos', icon: ShoppingCart },
-                              { id: 'invoices', label: isClinica ? 'Faturamento' : 'Gerenciar vendas', icon: History },
-                              { id: 'catalogs', label: isClinica ? 'Procedimentos' : 'Catálogos', icon: FolderOpen },
-                              { id: 'stock', label: 'Estoque & Insumos', icon: Package }
-                            ]
-                          },
-                          {
-                            id: 'clientes_agenda',
-                            name: 'Clientes & Agenda',
-                            icon: CalendarClock,
-                            subtabs: [
-                              { id: 'schedule', label: isClinica ? 'Agenda Médica' : 'Agenda', icon: CalendarClock },
-                              { id: 'clients', label: isClinica ? 'Pacientes' : 'Clientes', icon: Users }
-                            ]
-                          },
-                          {
-                            id: 'financeiro_fiscal',
-                            name: 'Financeiro & Fiscal',
-                            icon: DollarSign,
-                            subtabs: [
-                              { id: 'cobranças', label: 'Cobranças', icon: DollarSign },
-                              { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp },
-                              { id: 'fiscal', label: 'Painel MEI & Fiscal', icon: Landmark }
-                            ]
-                          },
-                          {
-                            id: 'gestao_loja',
-                            name: 'Gestão da Loja',
-                            icon: Settings,
-                            subtabs: [
-                              { id: 'employees', label: isClinica ? 'Médicos & Equipe' : 'Funcionários', icon: UserCheck },
-                              { id: 'ecommerce', label: 'E-commerce', icon: Globe }
-                            ]
-                          }
-                        ];
-
-                        return modules.map(module => {
-                          const visibleSubtabs = getFilteredSubtabs(module.subtabs);
-                          if (visibleSubtabs.length === 0) return null;
-
-                          const isModuleActive = visibleSubtabs.some(sub => activeSubTab === sub.id);
-                          const ModuleIcon = module.icon;
-
-                          return (
-                            <div
-                              key={module.id}
-                              className="relative dropdown-module"
-                              onMouseEnter={() => {
-                                if (!isLocked) {
-                                  setOpenDropdown(module.id);
-                                }
-                              }}
-                              onMouseLeave={() => {
-                                if (!isLocked) {
-                                  setOpenDropdown(null);
-                                }
-                              }}
-                            >
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (openDropdown === module.id && isLocked) {
-                                    setOpenDropdown(null);
-                                    setIsLocked(false);
-                                  } else {
-                                    setOpenDropdown(module.id);
-                                    setIsLocked(true);
-                                  }
-                                }}
-                                className={`flex items-center gap-1.5 px-4 py-3.5 border-b-2 text-xs font-extrabold transition-all relative ${
-                                  isModuleActive 
-                                    ? 'border-pix text-pix' 
-                                    : 'border-transparent text-slate-400 hover:text-slate-600'
-                                }`}
-                              >
-                                <ModuleIcon className="w-4 h-4" />
-                                <span>{module.name}</span>
-                                <span className="text-[8px] opacity-60 ml-0.5">▼</span>
-                              </button>
-
-                              {openDropdown === module.id && (
-                                <div className="absolute top-full left-0 mt-0.5 bg-[#171923] border border-slate-800 rounded-2xl shadow-2xl py-2 min-w-[220px] z-30 flex flex-col animate-fade-in">
-                                  {visibleSubtabs.map(subTab => {
-                                    const isSubActive = activeSubTab === subTab.id;
-                                    const SubIcon = subTab.icon;
-                                    return (
-                                      <button
-                                        key={subTab.id}
-                                        onClick={() => {
-                                          setActiveSubTab(subTab.id as any);
-                                          setOpenDropdown(null);
-                                          setIsLocked(false);
-                                        }}
-                                        className={`flex items-center gap-2.5 px-4 py-3 text-[11px] font-extrabold text-left transition-all ${
-                                          isSubActive
-                                            ? 'bg-pix/15 text-[#4FD1C5]'
-                                            : 'text-slate-300 hover:text-white hover:bg-slate-800/40'
-                                        }`}
-                                      >
-                                        <SubIcon className="w-4 h-4" />
-                                        <span>{subTab.label}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
+                          <LogOut className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                );
-              })()}
+                </div>
+              );
+            })()}
 
-              <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+            <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
                 {activeSubTab === 'pdv' && (
                   <QuickPOS
                     storeId={activeStoreId!}
@@ -2723,9 +2792,15 @@ function MandaPixApp() {
                     webhookLogs={webhookLogs}
                   />
                 )}
+
+                {activeSubTab === 'store_settings' && (
+                  <StoreSettings
+                    store={stores.find(s => s.id === activeStoreId)!}
+                    onSaveStore={handleEditStore}
+                  />
+                )}
               </div>
             </div>
-          )
         )}
 
         {activeTab === 'wallets' && (

@@ -20,7 +20,10 @@ import {
   CalendarClock,
   Globe,
   Barcode,
-  UserCheck
+  UserCheck,
+  Package,
+  Landmark,
+  Settings
 } from 'lucide-react';
 import { 
   BrowserRouter, 
@@ -48,6 +51,9 @@ import { ScheduleManager } from './components/ScheduleManager';
 import { BillingSettingsManager } from './components/BillingSettingsManager';
 import { EmployeeManager } from './components/EmployeeManager';
 import { PublicStorefront } from './pages/PublicStorefront';
+import { StockManager } from './components/StockManager';
+import { CashFlowManager } from './components/CashFlowManager';
+import { FiscalManager } from './components/FiscalManager';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
@@ -149,7 +155,7 @@ function MandaPixApp() {
   // States de Dados
   const [stores, setStores] = useState<Store[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'employees' | 'ecommerce' | 'cobranças'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'pdv' | 'orders' | 'invoices' | 'clients' | 'catalogs' | 'schedule' | 'employees' | 'ecommerce' | 'cobranças' | 'stock' | 'cashflow' | 'fiscal'>('orders');
 
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
@@ -171,6 +177,23 @@ function MandaPixApp() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [routingSettings, setRoutingSettings] = useState<any>(null);
   const [ecommerceSettings, setEcommerceSettings] = useState<EcommerceSettings | null>(null);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [webhookUrl, setWebhookUrl] = useState<string>('');
+  const [webhookLogs, setWebhookLogs] = useState<any[]>([]);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.dropdown-module')) {
+        setOpenDropdown(null);
+        setIsLocked(false);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
 
   const loadEcommerceSettings = async (storeId: string) => {
     try {
@@ -217,7 +240,8 @@ function MandaPixApp() {
         loadInvoices(),
         loadOrders(),
         loadRoutingSettings(),
-        loadScheduleData()
+        loadScheduleData(),
+        loadExpenses()
       ]);
     } catch (err) {
       console.error('Erro ao carregar dados do Supabase:', err);
@@ -423,7 +447,8 @@ function MandaPixApp() {
         phone: d.phone,
         role: d.role as any,
         accessCode: d.access_code,
-        allowWallets: d.allow_wallets
+        allowWallets: d.allow_wallets,
+        commission_rate: d.commission_rate !== undefined ? Number(d.commission_rate) : 30
       })));
     } catch (err) {
       console.warn('Erro ao carregar funcionários do Supabase. Usando dados locais:', err);
@@ -469,7 +494,10 @@ function MandaPixApp() {
       type: d.type,
       price: Number(d.price),
       description: d.description,
-      image: d.image
+      image: d.image,
+      stock_quantity: d.stock_quantity !== undefined ? Number(d.stock_quantity) : 10,
+      commission_rate: d.commission_rate !== undefined ? Number(d.commission_rate) : 50,
+      insumos: d.insumos || []
     })));
   };
 
@@ -557,6 +585,7 @@ function MandaPixApp() {
       invoiceId: d.invoice_id,
       scheduledAt: d.scheduled_at || undefined,
       scheduleSlotId: d.schedule_slot_id || undefined,
+      commission_split: d.commission_split
     })));
   };
 
@@ -808,7 +837,8 @@ function MandaPixApp() {
           loadInvoices(tenantIdToUse),
           loadOrders(tenantIdToUse),
           loadRoutingSettings(),
-          loadScheduleData(tenantIdToUse)
+          loadScheduleData(tenantIdToUse),
+          loadExpenses(tenantIdToUse)
         ]);
       } catch (err) {
         console.error('Erro ao carregar dados do Supabase:', err);
@@ -1289,14 +1319,41 @@ function MandaPixApp() {
 
   const handleUpdateOrderStatus = async (id: string, newStatus: Order['status']) => {
     try {
+      const order = orders.find(o => o.id === id);
+      let calculatedSplit = order?.commission_split;
+      
+      if (newStatus === 'PIX Confirmado' && order && order.scheduleSlotId) {
+        const slot = scheduleSlots.find(s => s.id === order.scheduleSlotId);
+        if (slot) {
+          const calendar = scheduleCalendars.find(c => c.id === slot.calendarId);
+          if (calendar && calendar.employee_id) {
+            const employee = employees.find(e => e.id === calendar.employee_id);
+            if (employee) {
+              const rate = employee.commission_rate ?? 30;
+              const professionalAmount = parseFloat((order.totalAmount * rate / 100).toFixed(2));
+              const storeAmount = parseFloat((order.totalAmount - professionalAmount).toFixed(2));
+              calculatedSplit = {
+                employeeId: employee.id,
+                employeeName: employee.name,
+                rate,
+                professionalAmount,
+                storeAmount
+              };
+            }
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('orders')
-        .update({ status: newStatus })
+        .update({ 
+          status: newStatus,
+          commission_split: calculatedSplit
+        })
         .eq('id', id);
       if (error) throw error;
 
       if (newStatus === 'APROVADO') {
-        const order = orders.find(o => o.id === id);
         if (order && order.invoiceId) {
           const inv = invoices.find(i => i.id === order.invoiceId);
           if (inv && inv.installments.length > 0) {
@@ -1315,10 +1372,200 @@ function MandaPixApp() {
         }
       }
 
+      if (newStatus === 'PIX Confirmado' && order) {
+        if (webhookUrl) {
+          const isService = order.items.some(item => {
+            const prod = products.find(p => p.id === item.productServiceId);
+            return prod?.type === 'SERVICO';
+          }) || activeBranch?.key === 'servicos';
+          
+          const invoiceType = isService ? 'NFS-e (Serviço)' : 'NFC-e (Comércio)';
+          const logId = 'log-' + Math.random().toString(36).substring(2, 9);
+          
+          try {
+            await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event: 'order.payment_confirmed',
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                clientName: order.clientName,
+                clientDocument: order.clientDocument,
+                totalAmount: order.totalAmount,
+                items: order.items,
+                invoiceType,
+                timestamp: new Date().toISOString()
+              })
+            });
+            
+            const newLog = {
+              id: logId,
+              timestamp: new Date().toISOString(),
+              orderNumber: order.orderNumber,
+              clientName: order.clientName,
+              invoiceType,
+              status: 'SUCESSO' as const,
+              endpoint: webhookUrl,
+              payload: `Nota fiscal emitida com sucesso para o pedido #${order.orderNumber}`
+            };
+            setWebhookLogs(prev => {
+              const updated = [newLog, ...prev];
+              localStorage.setItem(`MANDAPIX_WEBHOOK_LOGS_${currentTenantId}`, JSON.stringify(updated));
+              return updated;
+            });
+          } catch (webErr) {
+            console.warn('Erro ao disparar webhook de faturamento:', webErr);
+            const newLog = {
+              id: logId,
+              timestamp: new Date().toISOString(),
+              orderNumber: order.orderNumber,
+              clientName: order.clientName,
+              invoiceType,
+              status: 'ERRO' as const,
+              endpoint: webhookUrl,
+              payload: `Erro na comunicação: ${webErr instanceof Error ? webErr.message : String(webErr)}`
+            };
+            setWebhookLogs(prev => {
+              const updated = [newLog, ...prev];
+              localStorage.setItem(`MANDAPIX_WEBHOOK_LOGS_${currentTenantId}`, JSON.stringify(updated));
+              return updated;
+            });
+          }
+        }
+
+        for (const item of order.items) {
+          const prod = products.find(p => p.id === item.productServiceId || p.name === item.name);
+          if (prod && prod.insumos && prod.insumos.length > 0) {
+            for (const insumo of prod.insumos) {
+              const insumoProduct = products.find(p => p.id === insumo.product_id);
+              if (insumoProduct) {
+                const currentStock = insumoProduct.stock_quantity ?? 10;
+                const quantityToDeduct = insumo.quantity * item.quantity;
+                const newStock = Math.max(0, currentStock - quantityToDeduct);
+                
+                await supabase
+                  .from('products')
+                  .update({ stock_quantity: newStock })
+                  .eq('id', insumoProduct.id);
+              }
+            }
+          }
+        }
+      }
+
       await loadOrders();
       await loadInvoices();
+      await loadProducts();
     } catch (err) {
       console.error('Erro ao atualizar status do pedido:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (currentTenantId) {
+      const savedUrl = localStorage.getItem(`MANDAPIX_WEBHOOK_URL_${currentTenantId}`) || '';
+      setWebhookUrl(savedUrl);
+      const savedLogs = localStorage.getItem(`MANDAPIX_WEBHOOK_LOGS_${currentTenantId}`);
+      setWebhookLogs(savedLogs ? JSON.parse(savedLogs) : []);
+    }
+  }, [currentTenantId]);
+
+  const loadExpenses = async (tenantId = currentTenantId) => {
+    if (!tenantId) return;
+    try {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('due_date', { ascending: true });
+      if (error) throw error;
+      setExpenses((data || []).map((d: any) => ({
+        id: d.id,
+        storeId: d.store_id,
+        category: d.category,
+        description: d.description,
+        amount: Number(d.amount),
+        dueDate: d.due_date,
+        status: d.status
+      })));
+    } catch (err) {
+      console.warn('Erro ao carregar despesas do Supabase, usando local:', err);
+      const local = localStorage.getItem(`MANDAPIX_LOCAL_EXPENSES_${tenantId}`);
+      if (local) {
+        setExpenses(JSON.parse(local));
+      } else {
+        setExpenses([]);
+      }
+    }
+  };
+
+  const handleAddExpense = async (newExpData: any) => {
+    if (!currentTenantId) return;
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .insert([{
+          tenant_id: currentTenantId,
+          store_id: newExpData.storeId,
+          category: newExpData.category,
+          description: newExpData.description,
+          amount: newExpData.amount,
+          due_date: newExpData.dueDate,
+          status: newExpData.status
+        }]);
+      if (error) throw error;
+      await loadExpenses();
+    } catch (err) {
+      console.warn('Erro ao adicionar despesa no Supabase, salvando localmente:', err);
+      const newExp = {
+        id: 'exp-' + Math.random().toString(36).substring(2, 9),
+        ...newExpData
+      };
+      const updated = [...expenses, newExp];
+      setExpenses(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EXPENSES_${currentTenantId}`, JSON.stringify(updated));
+    }
+  };
+
+  const handlePayExpense = async (id: string, newStatus: 'PENDENTE' | 'PAGO') => {
+    if (!currentTenantId) return;
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .update({ status: newStatus })
+        .eq('id', id);
+      if (error) throw error;
+      await loadExpenses();
+    } catch (err) {
+      console.warn('Erro ao atualizar status da despesa no Supabase, usando local:', err);
+      const updated = expenses.map(e => e.id === id ? { ...e, status: newStatus } : e);
+      setExpenses(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EXPENSES_${currentTenantId}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!currentTenantId) return;
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      await loadExpenses();
+    } catch (err) {
+      console.warn('Erro ao deletar despesa no Supabase, usando local:', err);
+      const updated = expenses.filter(e => e.id !== id);
+      setExpenses(updated);
+      localStorage.setItem(`MANDAPIX_LOCAL_EXPENSES_${currentTenantId}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleWebhookUrlChange = (url: string) => {
+    setWebhookUrl(url);
+    if (currentTenantId) {
+      localStorage.setItem(`MANDAPIX_WEBHOOK_URL_${currentTenantId}`, url);
     }
   };
 
@@ -2170,51 +2417,143 @@ function MandaPixApp() {
                       )}
                     </div>
 
-                    <div className="flex px-5 bg-white overflow-x-auto">
-                      {([
-                        { id: 'pdv', label: 'PDV Rápido', icon: Barcode },
-                        { id: 'orders', label: isClinica ? 'Consultas' : 'Pedidos', icon: ShoppingCart },
-                        { id: 'invoices', label: isClinica ? 'Faturamento' : 'Gerenciar vendas', icon: History },
-                        { id: 'clients', label: isClinica ? 'Pacientes' : 'Clientes', icon: Users },
-                        { id: 'catalogs', label: isClinica ? 'Procedimentos' : 'Catálogos', icon: FolderOpen },
-                        { id: 'schedule', label: isClinica ? 'Agenda Médica' : 'Agendamento', icon: CalendarClock },
-                        { id: 'employees', label: isClinica ? 'Médicos & Equipe' : 'Funcionários', icon: UserCheck },
-                        { id: 'ecommerce', label: 'E-commerce', icon: Globe },
-                        { id: 'cobranças', label: 'Cobranças', icon: DollarSign }
-                      ] as const)
-                        .filter(subTab => {
-                          if (activeEmployee) {
-                            if (activeEmployee.role === 'GERENTE') {
-                              if (subTab.id === 'ecommerce' || subTab.id === 'cobranças') return false;
-                            } else if (activeEmployee.role === 'VENDEDOR') {
-                              if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
-                            } else if (activeEmployee.role === 'ATENDENTE') {
-                              if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(subTab.id)) return false;
+                    <div className="flex px-5 bg-white border-b border-slate-100 select-none relative overflow-visible z-20">
+                      {(() => {
+                        const getFilteredSubtabs = (subtabs: any[]) => {
+                          return subtabs.filter(subTab => {
+                            if (activeEmployee) {
+                              if (activeEmployee.role === 'GERENTE') {
+                                if (['ecommerce', 'cobranças', 'fiscal'].includes(subTab.id)) return false;
+                              } else if (activeEmployee.role === 'VENDEDOR') {
+                                if (!['pdv', 'orders', 'schedule'].includes(subTab.id)) return false;
+                              } else if (activeEmployee.role === 'ATENDENTE') {
+                                if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(subTab.id)) return false;
+                              }
                             }
+                            if (!activeBranch) return true;
+                            if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
+                            if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
+                            return true;
+                          });
+                        };
+
+                        const modules = [
+                          {
+                            id: 'vendas_catalogo',
+                            name: 'Vendas & Catálogo',
+                            icon: ShoppingBag,
+                            subtabs: [
+                              ...(activeBranch?.key === 'varejo' ? [{ id: 'pdv', label: 'PDV Rápido', icon: Barcode }] : []),
+                              { id: 'orders', label: isClinica ? 'Consultas' : 'Pedidos', icon: ShoppingCart },
+                              { id: 'invoices', label: isClinica ? 'Faturamento' : 'Gerenciar vendas', icon: History },
+                              { id: 'catalogs', label: isClinica ? 'Procedimentos' : 'Catálogos', icon: FolderOpen },
+                              { id: 'stock', label: 'Estoque & Insumos', icon: Package }
+                            ]
+                          },
+                          {
+                            id: 'clientes_agenda',
+                            name: 'Clientes & Agenda',
+                            icon: CalendarClock,
+                            subtabs: [
+                              { id: 'schedule', label: isClinica ? 'Agenda Médica' : 'Agenda', icon: CalendarClock },
+                              { id: 'clients', label: isClinica ? 'Pacientes' : 'Clientes', icon: Users }
+                            ]
+                          },
+                          {
+                            id: 'financeiro_fiscal',
+                            name: 'Financeiro & Fiscal',
+                            icon: DollarSign,
+                            subtabs: [
+                              { id: 'cobranças', label: 'Cobranças', icon: DollarSign },
+                              { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp },
+                              { id: 'fiscal', label: 'Painel MEI & Fiscal', icon: Landmark }
+                            ]
+                          },
+                          {
+                            id: 'gestao_loja',
+                            name: 'Gestão da Loja',
+                            icon: Settings,
+                            subtabs: [
+                              { id: 'employees', label: isClinica ? 'Médicos & Equipe' : 'Funcionários', icon: UserCheck },
+                              { id: 'ecommerce', label: 'E-commerce', icon: Globe }
+                            ]
                           }
-                          if (!activeBranch) return true;
-                          if (subTab.id === 'schedule' && activeBranch.config?.hide_agenda) return false;
-                          if (subTab.id === 'pdv' && activeBranch.key !== 'varejo') return false;
-                          return true;
-                        })
-                        .map(subTab => {
-                        const Icon = subTab.icon;
-                        const isSubActive = activeSubTab === subTab.id;
-                        return (
-                          <button
-                            key={subTab.id}
-                            onClick={() => setActiveSubTab(subTab.id)}
-                            className={`flex items-center gap-2 px-4 py-3 border-b-2 text-xs font-bold transition-all relative ${
-                              isSubActive 
-                                ? 'border-pix text-pix' 
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                            }`}
-                          >
-                            <Icon className="w-4 h-4" />
-                            <span>{subTab.label}</span>
-                          </button>
-                        );
-                      })}
+                        ];
+
+                        return modules.map(module => {
+                          const visibleSubtabs = getFilteredSubtabs(module.subtabs);
+                          if (visibleSubtabs.length === 0) return null;
+
+                          const isModuleActive = visibleSubtabs.some(sub => activeSubTab === sub.id);
+                          const ModuleIcon = module.icon;
+
+                          return (
+                            <div
+                              key={module.id}
+                              className="relative dropdown-module"
+                              onMouseEnter={() => {
+                                if (!isLocked) {
+                                  setOpenDropdown(module.id);
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (!isLocked) {
+                                  setOpenDropdown(null);
+                                }
+                              }}
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (openDropdown === module.id && isLocked) {
+                                    setOpenDropdown(null);
+                                    setIsLocked(false);
+                                  } else {
+                                    setOpenDropdown(module.id);
+                                    setIsLocked(true);
+                                  }
+                                }}
+                                className={`flex items-center gap-1.5 px-4 py-3.5 border-b-2 text-xs font-extrabold transition-all relative ${
+                                  isModuleActive 
+                                    ? 'border-pix text-pix' 
+                                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                                }`}
+                              >
+                                <ModuleIcon className="w-4 h-4" />
+                                <span>{module.name}</span>
+                                <span className="text-[8px] opacity-60 ml-0.5">▼</span>
+                              </button>
+
+                              {openDropdown === module.id && (
+                                <div className="absolute top-full left-0 mt-0.5 bg-[#171923] border border-slate-800 rounded-2xl shadow-2xl py-2 min-w-[220px] z-30 flex flex-col animate-fade-in">
+                                  {visibleSubtabs.map(subTab => {
+                                    const isSubActive = activeSubTab === subTab.id;
+                                    const SubIcon = subTab.icon;
+                                    return (
+                                      <button
+                                        key={subTab.id}
+                                        onClick={() => {
+                                          setActiveSubTab(subTab.id as any);
+                                          setOpenDropdown(null);
+                                          setIsLocked(false);
+                                        }}
+                                        className={`flex items-center gap-2.5 px-4 py-3 text-[11px] font-extrabold text-left transition-all ${
+                                          isSubActive
+                                            ? 'bg-pix/15 text-[#4FD1C5]'
+                                            : 'text-slate-300 hover:text-white hover:bg-slate-800/40'
+                                        }`}
+                                      >
+                                        <SubIcon className="w-4 h-4" />
+                                        <span>{subTab.label}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 );
@@ -2349,6 +2688,39 @@ function MandaPixApp() {
                     onAddEmployee={(emp) => handleAddEmployee({ ...emp, storeId: activeStoreId! })}
                     onEditEmployee={handleEditEmployee}
                     onDeleteEmployee={handleDeleteEmployee}
+                    orders={orders.filter(o => o.storeId === activeStoreId)}
+                  />
+                )}
+
+                {activeSubTab === 'stock' && (
+                  <StockManager
+                    products={products.filter(p => {
+                      const cat = catalogs.find(c => c.id === p.catalogId);
+                      return cat && cat.storeId === activeStoreId;
+                    })}
+                    catalogs={catalogs.filter(cat => cat.storeId === activeStoreId)}
+                    onEditProduct={handleEditProduct}
+                  />
+                )}
+
+                {activeSubTab === 'cashflow' && (
+                  <CashFlowManager
+                    storeId={activeStoreId!}
+                    orders={orders.filter(o => o.storeId === activeStoreId)}
+                    expenses={expenses.filter(e => e.storeId === activeStoreId)}
+                    onAddExpense={handleAddExpense}
+                    onPayExpense={handlePayExpense}
+                    onDeleteExpense={handleDeleteExpense}
+                  />
+                )}
+
+                {activeSubTab === 'fiscal' && (
+                  <FiscalManager
+                    storeId={activeStoreId!}
+                    orders={orders.filter(o => o.storeId === activeStoreId)}
+                    webhookUrl={webhookUrl}
+                    onWebhookUrlChange={handleWebhookUrlChange}
+                    webhookLogs={webhookLogs}
                   />
                 )}
               </div>

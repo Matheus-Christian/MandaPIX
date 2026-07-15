@@ -1084,7 +1084,7 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
                     <div className="space-y-4 pt-2 border-t border-slate-200/60 animate-fade-in">
                       {scheduleCalendars.length === 0 ? (
                         <p className="text-[10px] text-amber-600 font-bold">
-                          * Nenhum calendário de agendamento ativo cadastrado nesta loja. Configure-os na aba de Agendamento.
+                          * Nenhum calendário de agendamento ativo cadastrado nesta loja. Configure-os na aba Agenda.
                         </p>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

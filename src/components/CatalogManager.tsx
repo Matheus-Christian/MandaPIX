@@ -49,6 +49,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productDescription, setProductDescription] = useState('');
   const [productErrors, setProductErrors] = useState<{ [key: string]: string }>({});
   const [productImage, setProductImage] = useState<string | undefined>(undefined);
+  const [stockQuantity, setStockQuantity] = useState<number>(10);
+  const [commissionRate, setCommissionRate] = useState<number>(50);
+  const [insumosList, setInsumosList] = useState<Array<{ product_id: string; quantity: number }>>([]);
+  const [selectedInsumoId, setSelectedInsumoId] = useState<string>('');
+  const [insumoQty, setInsumoQty] = useState<number>(1);
 
   // Cropper states
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
@@ -216,6 +221,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductPriceRaw('');
     setProductDescription('');
     setProductImage(undefined);
+    setStockQuantity(10);
+    setCommissionRate(50);
+    setInsumosList([]);
+    setSelectedInsumoId('');
+    setInsumoQty(1);
     setProductErrors({});
     setIsProductModalOpen(true);
   };
@@ -227,6 +237,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductPriceRaw(prod.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 }));
     setProductDescription(prod.description);
     setProductImage(prod.image);
+    setStockQuantity(prod.stock_quantity ?? 10);
+    setCommissionRate(prod.commission_rate ?? 50);
+    setInsumosList(prod.insumos || []);
+    setSelectedInsumoId('');
+    setInsumoQty(1);
     setProductErrors({});
     setIsProductModalOpen(true);
   };
@@ -261,6 +276,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         price,
         description: productDescription.trim(),
         image: productImage,
+        stock_quantity: stockQuantity,
+        commission_rate: commissionRate,
+        insumos: insumosList
       });
     } else {
       onAddProduct({
@@ -270,6 +288,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         price,
         description: productDescription.trim(),
         image: productImage,
+        stock_quantity: stockQuantity,
+        commission_rate: commissionRate,
+        insumos: insumosList
       });
     }
 
@@ -714,11 +735,109 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Comissão do Profissional (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={commissionRate}
+                    onChange={(e) => setCommissionRate(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+                    Qtd. em Estoque {productType !== 'PRODUTO' && '(Apenas Prod.)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    disabled={productType !== 'PRODUTO'}
+                    value={productType === 'PRODUTO' ? stockQuantity : ''}
+                    onChange={(e) => setStockQuantity(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              {/* Ficha Técnica / Insumos */}
+              <div className="border border-slate-100 p-4 bg-slate-50/50 rounded-2xl space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Ficha Técnica (Consumo de Insumos)</label>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Insumos: {insumosList.length}</span>
+                </div>
+
+                {insumosList.length > 0 && (
+                  <div className="space-y-1.5 max-h-24 overflow-y-auto bg-white border border-slate-100 p-2 rounded-xl">
+                    {insumosList.map((ins, idx) => {
+                      const insItem = products.find(prod => prod.id === ins.product_id);
+                      return (
+                        <div key={idx} className="flex justify-between items-center text-xs text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+                          <span className="font-semibold truncate max-w-[200px]">{insItem?.name || 'Insumo Desconhecido'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-500">{ins.quantity} un.</span>
+                            <button
+                              type="button"
+                              onClick={() => setInsumosList(insumosList.filter((_, i) => i !== idx))}
+                              className="text-red-500 hover:text-red-750 font-bold text-[10px]"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <select
+                    value={selectedInsumoId}
+                    onChange={(e) => setSelectedInsumoId(e.target.value)}
+                    className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none"
+                  >
+                    <option value="">-- Selecione Insumo --</option>
+                    {products
+                      .filter(prod => prod.type === 'PRODUTO' && prod.id !== editingProduct?.id)
+                      .map(prod => (
+                        <option key={prod.id} value={prod.id}>{prod.name}</option>
+                      ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    value={insumoQty}
+                    onChange={(e) => setInsumoQty(Math.max(1, Number(e.target.value)))}
+                    className="w-16 px-2 py-1.5 text-xs border border-slate-200 rounded-xl bg-white text-center text-slate-800 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedInsumoId) return;
+                      const existing = insumosList.find(ins => ins.product_id === selectedInsumoId);
+                      if (existing) {
+                        setInsumosList(insumosList.map(ins => ins.product_id === selectedInsumoId ? { ...ins, quantity: ins.quantity + insumoQty } : ins));
+                      } else {
+                        setInsumosList([...insumosList, { product_id: selectedInsumoId, quantity: insumoQty }]);
+                      }
+                      setSelectedInsumoId('');
+                      setInsumoQty(1);
+                    }}
+                    className="bg-pix text-white px-3 rounded-xl hover:bg-pix-dark transition-colors font-bold text-xs"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Descrição Breve (Opcional)</label>
                 <textarea
                   placeholder="Escreva detalhes técnicos ou características do produto/serviço..."
-                  rows={3}
+                  rows={2}
                   value={productDescription}
                   onChange={(e) => setProductDescription(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"

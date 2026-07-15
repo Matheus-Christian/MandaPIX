@@ -452,6 +452,7 @@ export interface Employee {
   role: 'GERENTE' | 'VENDEDOR' | 'ATENDENTE';
   accessCode: string;
   allowWallets?: boolean;
+  commission_rate?: number;
 }
 
 export interface Catalog {
@@ -471,6 +472,7 @@ export interface ProductService {
   image?: string;
   stock_quantity?: number;
   commission_rate?: number;
+  insumos?: Array<{ product_id: string; quantity: number }>;
 }
 
 export interface Installment {
@@ -710,6 +712,8 @@ export interface Order {
     professionalAmount: number;
     storeAmount: number;
     rate: number;
+    employeeId?: string;
+    employeeName?: string;
   } | null;
 }
 
@@ -747,6 +751,7 @@ export interface ScheduleCalendar {
   showSlotsToClient: boolean;      // Exibe vagas disponíveis para o cliente final
   requireScheduling: boolean;      // Torna seleção de slot obrigatória no pedido
   advanceDays: number;             // Janela de dias futuros disponíveis para agendar
+  employee_id?: string;            // Linked professional/employee ID
 }
 
 export interface ScheduleSlot {

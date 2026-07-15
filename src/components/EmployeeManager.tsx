@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { ShieldAlert, Search, Plus, Trash2, X, Edit, Eye, EyeOff } from 'lucide-react';
-import type { Employee } from '../utils/pix';
+import type { Employee, Order } from '../utils/pix';
 
 interface EmployeeManagerProps {
   employees: Employee[];
   onAddEmployee: (employee: Omit<Employee, 'id'>) => void;
   onEditEmployee: (employee: Employee) => void;
   onDeleteEmployee: (id: string) => void;
+  orders?: Order[];
 }
 
 export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
@@ -14,6 +15,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
   onAddEmployee,
   onEditEmployee,
   onDeleteEmployee,
+  orders = [],
 }) => {
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -27,6 +29,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
   const [accessCode, setAccessCode] = useState('');
   const [showAccessCode, setShowAccessCode] = useState(false);
   const [allowWallets, setAllowWallets] = useState(false);
+  const [commissionRate, setCommissionRate] = useState('30');
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const startEditEmployee = (emp: Employee) => {
@@ -37,6 +40,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setRole(emp.role);
     setAccessCode(emp.accessCode);
     setAllowWallets(emp.allowWallets || false);
+    setCommissionRate(emp.commission_rate ? emp.commission_rate.toString() : '30');
     setIsAdding(true);
     setErrors({});
   };
@@ -50,6 +54,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setRole('VENDEDOR');
     setAccessCode('');
     setAllowWallets(false);
+    setCommissionRate('30');
     setErrors({});
   };
 
@@ -95,6 +100,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         role,
         accessCode: accessCode.trim(),
         allowWallets: allowWallets,
+        commission_rate: Number(commissionRate)
       });
     } else {
       onAddEmployee({
@@ -104,6 +110,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         role,
         accessCode: accessCode.trim(),
         allowWallets: allowWallets,
+        commission_rate: Number(commissionRate)
       });
     }
 
@@ -114,6 +121,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setRole('VENDEDOR');
     setAccessCode('');
     setAllowWallets(false);
+    setCommissionRate('30');
     setEditingEmployee(null);
     setErrors({});
     setIsAdding(false);
@@ -220,27 +228,40 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                   {errors.phone && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.phone}</p>}
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Código de Acesso (PIN/Senha)</label>
-                <div className="relative">
-                  <input
-                    type={showAccessCode ? 'text' : 'password'}
-                    placeholder="Mínimo 4 caracteres (Ex: 1234)"
-                    value={accessCode}
-                    onChange={(e) => { setAccessCode(e.target.value); if (errors.accessCode) setErrors(prev => ({ ...prev, accessCode: '' })); }}
-                    className={`w-full px-3 py-2 pr-12 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-mono ${errors.accessCode ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAccessCode(!showAccessCode)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-455 hover:text-slate-600"
-                  >
-                    {showAccessCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Código de Acesso (PIN/Senha)</label>
+                  <div className="relative">
+                    <input
+                      type={showAccessCode ? 'text' : 'password'}
+                      placeholder="Mínimo 4 caracteres (Ex: 1234)"
+                      value={accessCode}
+                      onChange={(e) => { setAccessCode(e.target.value); if (errors.accessCode) setErrors(prev => ({ ...prev, accessCode: '' })); }}
+                      className={`w-full px-3 py-2 pr-12 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-mono ${errors.accessCode ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAccessCode(!showAccessCode)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-655"
+                    >
+                      {showAccessCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {errors.accessCode && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.accessCode}</p>}
                 </div>
-                {errors.accessCode && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.accessCode}</p>}
-                <p className="text-[10px] text-slate-400 mt-1 font-semibold">Este código será solicitado quando o funcionário selecionar seu perfil para acessar o PDV ou Pedidos da loja.</p>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Taxa de Comissão (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="Ex: 30"
+                    value={commissionRate}
+                    onChange={(e) => setCommissionRate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-808 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-bold"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2.5 py-3 px-4 bg-slate-50 rounded-xl border border-slate-100">
@@ -307,6 +328,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                         <th className="p-4">Cargo</th>
                         <th className="p-4">Contato</th>
                         <th className="p-4">Código / PIN</th>
+                        <th className="p-4">Comissão (%)</th>
                         <th className="p-4">Acesso Carteiras</th>
                         <th className="p-4 text-right pr-6">Ações</th>
                       </tr>
@@ -342,6 +364,9 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                           <td className="p-4 font-mono font-bold text-slate-655">
                             •••• (PIN Oculto)
                           </td>
+                          <td className="p-4 font-bold text-slate-800 font-mono">
+                            {emp.commission_rate ?? 30}%
+                          </td>
                           <td className="p-4">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                               emp.allowWallets 
@@ -374,6 +399,63 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                 </div>
               </div>
             )}
+            {/* Fechamento de Folha & Comissões Report */}
+            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm p-6 space-y-4">
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Fechamento de Folha & Comissões</h3>
+                <p className="text-[10px] text-slate-400">Histórico de comissões ganhas em agendamentos concluídos no PIX</p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-550/10 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <th className="py-2.5 px-4">Profissional</th>
+                      <th className="py-2.5 px-4">Serviços Concluídos</th>
+                      <th className="py-2.5 px-4 text-right">Comissões a Pagar</th>
+                      <th className="py-2.5 px-4 text-right">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {employees.map(emp => {
+                      // Calculate commissions
+                      const empOrders = orders.filter(o => 
+                        o.commission_split && 
+                        o.commission_split.employeeId === emp.id && 
+                        ['PIX Confirmado', 'VENDA_CONCLUIDA', 'DIVISAO_COMISSAO', 'APROVADO'].includes(o.status)
+                      );
+                      const totalCommission = empOrders.reduce((sum, o) => sum + (o.commission_split?.professionalAmount || 0), 0);
+
+                      return (
+                        <tr key={emp.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3 px-4 font-bold text-slate-800">{emp.name}</td>
+                          <td className="py-3 px-4 font-medium text-slate-500 font-mono">{empOrders.length} atendimentos</td>
+                          <td className="py-3 px-4 text-right font-bold text-pix font-mono">
+                            R$ {totalCommission.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={() => {
+                                if (totalCommission === 0) return;
+                                alert(`Simulação: Fechamento de Folha realizado para ${emp.name}. R$ ${totalCommission.toFixed(2)} pagos com sucesso!`);
+                              }}
+                              disabled={totalCommission === 0}
+                              className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
+                                totalCommission > 0
+                                  ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'
+                                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                              }`}
+                            >
+                              Fechar Folha
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>

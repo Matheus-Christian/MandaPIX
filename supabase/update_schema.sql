@@ -353,3 +353,45 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- ====================================================================
+-- MandaPIX - Novas Funcionalidades ERP (Estoque, Comissão, Despesas e Fiscal)
+-- ====================================================================
+
+-- 1. Coluna de comissão na tabela de funcionários
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5, 2) DEFAULT 0.00;
+
+-- 2. Coluna de funcionário associado na tabela de calendários
+ALTER TABLE public.schedule_calendars ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES public.employees(id) ON DELETE SET NULL;
+
+-- 3. Coluna de ficha técnica / insumos na tabela de produtos
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS insumos JSONB DEFAULT '[]'::jsonb;
+
+-- 4. Criação da tabela de despesas / contas a pagar
+CREATE TABLE IF NOT EXISTS public.expenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+  category TEXT NOT NULL, -- 'Aluguel', 'Luz', 'Insumos', 'Salários', 'Outros'
+  description TEXT NOT NULL,
+  amount NUMERIC(10, 2) NOT NULL,
+  due_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDENTE', -- 'PENDENTE', 'PAGO'
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Habilita RLS na tabela de despesas
+ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de RLS para despesas
+DROP POLICY IF EXISTS "Tenants e funcionários gerenciam despesas" ON public.expenses;
+CREATE POLICY "Tenants e funcionários gerenciam despesas"
+  ON public.expenses FOR ALL
+  USING (auth.uid() = tenant_id OR public.is_employee_of(tenant_id));
+
+-- Trigger para definir automatico o tenant_id nas despesas
+DROP TRIGGER IF EXISTS set_tenant_id_expenses ON public.expenses;
+CREATE TRIGGER set_tenant_id_expenses BEFORE INSERT ON public.expenses FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
+
+

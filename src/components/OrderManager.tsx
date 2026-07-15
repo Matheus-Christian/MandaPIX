@@ -367,7 +367,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
             ) : (
               <CalendarDays className="w-6 h-6 text-pix" />
             )}
-            {viewMode === 'PDV' ? (pdvSubMode === 'LIST' ? (isClinica ? 'Histórico de Consultas' : 'Histórico de Pedidos') : (isClinica ? 'Painel de Atendimento / Esteira' : 'Painel KDS / Fluxo')) : (isClinica ? 'Agenda de Consultas' : 'Agenda de Pedidos')}
+            {viewMode === 'PDV' ? (pdvSubMode === 'LIST' ? (isClinica ? 'Histórico de Consultas' : 'Histórico de Pedidos') : (isClinica ? 'Painel de Atendimento / Esteira' : 'Painel KDS / Fluxo')) : (activeBranch?.key === 'alimentacao' || activeBranch?.key === 'servicos' ? 'Pedidos agendados' : (isClinica ? 'Agenda de Consultas' : 'Agenda de Pedidos'))}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             {viewMode === 'PDV' 
@@ -501,7 +501,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
 
               {/* Status Select Tabs */}
               <div className="flex flex-wrap bg-slate-50 border border-slate-200 rounded-xl p-0.5 shadow-sm self-start gap-0.5">
-                {['ALL', ...statusFlow, 'CANCELADO'].map(f => {
+                {Array.from(new Set(['ALL', ...statusFlow, 'CANCELADO'])).map(f => {
                   const label = f === 'ALL' ? 'Todos' : formatStatusLabel(f);
                   
                   return (

@@ -47,6 +47,7 @@ import { CatalogManager } from './components/CatalogManager';
 import { InvoiceManager } from './components/InvoiceManager';
 import { SavedKeys } from './components/SavedKeys';
 import { StoreSettings } from './components/StoreSettings';
+import { DashboardCalendar } from './components/DashboardCalendar';
 import { OrderManager } from './components/OrderManager';
 import { EcommerceManager } from './components/EcommerceManager';
 import { ScheduleManager } from './components/ScheduleManager';
@@ -181,6 +182,11 @@ function MandaPixApp() {
     };
   });
 
+  const [isStoreMenuExpanded, setIsStoreMenuExpanded] = useState(() => {
+    const saved = localStorage.getItem('mandapix_store_menu_expanded');
+    return saved !== 'false';
+  });
+
   // Schedule states
   const [scheduleCalendars, setScheduleCalendars] = useState<ScheduleCalendar[]>([]);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
@@ -253,6 +259,16 @@ function MandaPixApp() {
   useEffect(() => {
     localStorage.setItem('mandapix_expanded_modules', JSON.stringify(expandedModules));
   }, [expandedModules]);
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_store_menu_expanded', String(isStoreMenuExpanded));
+  }, [isStoreMenuExpanded]);
+
+  useEffect(() => {
+    if (activeTab === 'stores') {
+      setIsStoreMenuExpanded(true);
+    }
+  }, [activeTab]);
 
   // Estados de Carregamento
   const [loadingData, setLoadingData] = useState(true);
@@ -1770,7 +1786,7 @@ function MandaPixApp() {
   };
 
   const menuItems = [
-    { id: 'dashboard', label: 'Painel', icon: Home },
+    { id: 'dashboard', label: 'Dashboards', icon: Home },
     { id: 'stores', label: 'Loja', icon: ShoppingBag },
     { id: 'wallets', label: 'Carteiras', icon: WalletIcon }
   ] as const;
@@ -1926,7 +1942,7 @@ function MandaPixApp() {
       
       {/* SIDEBAR NAVIGATION (Desktop) */}
       {!isDirectEmployee && (
-        <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white min-h-screen flex-shrink-0 z-20 shadow-xl">
+        <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white h-screen sticky top-0 flex-shrink-0 z-20 shadow-xl overflow-y-auto no-scrollbar">
           <div className="p-6 border-b border-slate-800/60 flex items-center gap-2.5">
             <div className="p-2 bg-pix rounded-xl text-white shadow-md shadow-pix/20">
               <svg viewBox="0 0 135 135" className="w-5 h-5 fill-white" xmlns="http://www.w3.org/2000/svg">
@@ -2004,8 +2020,12 @@ function MandaPixApp() {
                   <div key={item.id} className="flex flex-col gap-1 animate-fade-in">
                     <button
                       onClick={() => {
-                        setActiveTab('stores');
-                        setActiveSubTab('orders');
+                        if (activeTab === 'stores') {
+                          setIsStoreMenuExpanded(!isStoreMenuExpanded);
+                        } else {
+                          setActiveTab('stores');
+                          setActiveSubTab('orders');
+                        }
                         setIsSidebarOpen(false);
                         if (stores.length > 0) {
                           setActiveStoreId(stores[0].id);
@@ -2020,7 +2040,7 @@ function MandaPixApp() {
                       <Icon className="w-4 h-4" />
                       <span>{item.label}</span>
                     </button>
-                    {isActive && renderStoreSubmenu(false)}
+                    {isActive && isStoreMenuExpanded && renderStoreSubmenu(false)}
                   </div>
                 );
               }
@@ -2042,22 +2062,6 @@ function MandaPixApp() {
             })}
           </nav>
 
-          {/* Footer info in sidebar */}
-          {primaryKey && (
-            <div className="p-4 m-4 bg-slate-800/50 rounded-2xl border border-slate-800 flex items-center justify-between text-left">
-              <div className="truncate max-w-[140px]">
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Carteira Receptora</p>
-                <p className="text-xs font-bold text-white truncate mt-0.5">{primaryKey.label}</p>
-              </div>
-              <div className="w-6 h-6 rounded bg-pix/10 text-pix flex items-center justify-center font-bold text-[10px] uppercase">
-                {primaryKey.walletType === 'PIX'
-                  ? primaryKey.bankName.substring(0, 2)
-                  : primaryKey.walletType === 'CREDIT_CARD'
-                  ? 'CC'
-                  : 'CD'}
-              </div>
-            </div>
-          )}
         </aside>
       )}
 
@@ -2158,8 +2162,12 @@ function MandaPixApp() {
                       <div key={item.id} className="flex flex-col gap-1">
                         <button
                           onClick={() => {
-                            setActiveTab('stores');
-                            setActiveSubTab('orders');
+                            if (activeTab === 'stores') {
+                              setIsStoreMenuExpanded(!isStoreMenuExpanded);
+                            } else {
+                              setActiveTab('stores');
+                              setActiveSubTab('orders');
+                            }
                             if (stores.length > 0) {
                               setActiveStoreId(stores[0].id);
                             }
@@ -2173,7 +2181,7 @@ function MandaPixApp() {
                           <Icon className="w-4 h-4" />
                           <span>{item.label}</span>
                         </button>
-                        {isActive && renderStoreSubmenu(true)}
+                        {isActive && isStoreMenuExpanded && renderStoreSubmenu(true)}
                       </div>
                     );
                   }
@@ -2197,17 +2205,6 @@ function MandaPixApp() {
 
 
             </div>
-            {primaryKey && (
-              <div className="bg-slate-800/50 p-4 rounded-xl text-xs space-y-1 border border-slate-800">
-                <span className="text-[9px] uppercase font-bold text-slate-500">
-                  {primaryKey.walletType === 'PIX' ? 'Chave Principal' : 'Carteira Principal'}
-                </span>
-                <p className="font-semibold text-white">{primaryKey.label}</p>
-                <p className="font-mono text-[10px] text-slate-400 truncate">
-                  {primaryKey.walletType === 'PIX' ? primaryKey.key : `ID: •••• •••• •••• ${primaryKey.accountIdentifier?.slice(-4) || 'CARD'}`}
-                </p>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -2220,45 +2217,66 @@ function MandaPixApp() {
             {/* Dashboard Sub Header */}
             <div className="p-6 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Painel Financeiro</h2>
-                <p className="text-xs text-slate-400 mt-0.5 font-semibold">Resumo de contas a receber e faturamento</p>
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Filtrar Loja:</span>
-                  <select
-                    value={dashboardStoreFilter}
-                    onChange={(e) => setDashboardStoreFilter(e.target.value)}
-                    className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-pix/50 shadow-sm"
-                  >
-                    <option value="ALL">Todas as Lojas</option>
-                    {stores.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5 shadow-sm">
-                  {(['30_DAYS', '90_DAYS', 'THIS_MONTH', 'ALL'] as const).map(f => (
-                    <button
-                      key={f}
-                      onClick={() => setPeriodFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${
-                        periodFilter === f 
-                          ? 'bg-white text-slate-800 shadow-sm' 
-                          : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      {f === '30_DAYS' ? '30 dias' : f === '90_DAYS' ? '90 dias' : f === 'THIS_MONTH' ? 'Este Mês' : 'Tudo'}
-                    </button>
-                  ))}
-                </div>
+                <h2 className="text-xl font-bold text-slate-800">Dashboards</h2>
+                <p className="text-xs text-slate-400 mt-0.5 font-semibold">Resumo de agendamentos, contas a receber e faturamento</p>
               </div>
             </div>
 
             {/* Scrollable Dashboard Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+              
+              {/* Dashboard Weekly Calendar */}
+              <DashboardCalendar
+                orders={(() => {
+                  let filtered = orders;
+                  if (dashboardStoreFilter !== 'ALL') {
+                    filtered = orders.filter(o => o.storeId === dashboardStoreFilter);
+                  }
+                  return filtered;
+                })()}
+                isClinica={isClinica}
+                activeBranch={activeBranch}
+              />
+
+              {/* Financeiro Title and Filters */}
+              <div className="flex flex-col gap-4 pt-2 pb-1 border-t border-slate-100">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Financeiro</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 font-semibold">Resumo de contas a receber e faturamento</p>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-3 justify-start">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Filtrar Loja:</span>
+                    <select
+                      value={dashboardStoreFilter}
+                      onChange={(e) => setDashboardStoreFilter(e.target.value)}
+                      className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-pix/50 shadow-sm"
+                    >
+                      <option value="ALL">Todas as Lojas</option>
+                      {stores.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex bg-slate-100 border border-slate-200 rounded-xl p-0.5 shadow-sm">
+                    {(['30_DAYS', '90_DAYS', 'THIS_MONTH', 'ALL'] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setPeriodFilter(f)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${
+                          periodFilter === f 
+                            ? 'bg-white text-slate-800 shadow-sm' 
+                            : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        {f === '30_DAYS' ? '30 dias' : f === '90_DAYS' ? '90 dias' : f === 'THIS_MONTH' ? 'Este Mês' : 'Tudo'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
               
               {/* 4 KPI CARD MATRIX */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

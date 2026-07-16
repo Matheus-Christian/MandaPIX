@@ -16,13 +16,14 @@ import type { Order } from '../utils/pix';
 interface DashboardCalendarProps {
   orders: Order[];
   isClinica: boolean;
-  activeBranch: any;
+  activeBranch?: any;
 }
 
 export const DashboardCalendar: React.FC<DashboardCalendarProps> = ({
   orders,
   isClinica,
-  activeBranch
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  activeBranch: _activeBranch,
 }) => {
   const [agendaWeekOffset, setAgendaWeekOffset] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);

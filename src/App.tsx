@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Home, 
-  History, 
   Users, 
   ArrowRight, 
-  ArrowLeft, 
-  FolderOpen, 
   DollarSign, 
   Calendar, 
   Clock, 
@@ -14,16 +11,8 @@ import {
   X, 
   AlertCircle, 
   ShoppingBag, 
-  ShoppingCart, 
   Wallet as WalletIcon,
   LogOut,
-  CalendarClock,
-  Globe,
-  Barcode,
-  UserCheck,
-  Package,
-  Landmark,
-  Settings,
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
@@ -210,8 +199,8 @@ function MandaPixApp() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [webhookLogs, setWebhookLogs] = useState<any[]>([]);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
+  const [_openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [_isLocked, setIsLocked] = useState(false);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -998,17 +987,6 @@ function MandaPixApp() {
   }, [user]);
 
   // Callbacks para Lojas
-  const handleAddStore = async (newStoreData: Omit<Store, 'id'>) => {
-    try {
-      const { error } = await supabase
-        .from('stores')
-        .insert([newStoreData]);
-      if (error) throw error;
-      await loadStores();
-    } catch (err) {
-      console.error('Erro ao adicionar loja:', err);
-    }
-  };
 
   const handleEditStore = async (updatedStore: Store) => {
     try {
@@ -1029,23 +1007,6 @@ function MandaPixApp() {
       await loadStores();
     } catch (err) {
       console.error('Erro ao editar loja:', err);
-    }
-  };
-
-  const handleDeleteStore = async (id: string) => {
-    if (!confirm('Deseja excluir esta loja? Todos os catálogos, pedidos, clientes e faturas vinculados serão excluídos.')) return;
-    try {
-      const { error } = await supabase
-        .from('stores')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-      if (activeStoreId === id) {
-        setActiveStoreId(null);
-      }
-      await loadAllData();
-    } catch (err) {
-      console.error('Erro ao excluir loja:', err);
     }
   };
 

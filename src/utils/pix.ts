@@ -354,8 +354,18 @@ export const BANKS = [
   { name: 'Bradesco', gradient: 'from-red-800 via-red-700 to-rose-950', badgeColor: 'bg-red-500/20 text-red-300 border-red-500/30' },
   { name: 'Banco do Brasil', gradient: 'from-yellow-600 via-yellow-500 to-blue-900', badgeColor: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' },
   { name: 'Caixa', gradient: 'from-blue-800 via-blue-700 to-indigo-950', badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+  { name: 'Santander', gradient: 'from-red-700 via-red-650 to-rose-950', badgeColor: 'bg-red-500/20 text-red-300 border-red-500/30' },
   { name: 'Inter', gradient: 'from-amber-600 via-amber-500 to-orange-700', badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
   { name: 'C6 Bank', gradient: 'from-zinc-800 via-zinc-700 to-zinc-900', badgeColor: 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30' },
+  { name: 'Sicoob', gradient: 'from-teal-800 via-teal-700 to-emerald-950', badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
+  { name: 'Sicredi', gradient: 'from-green-700 via-green-600 to-green-950', badgeColor: 'bg-green-500/20 text-green-300 border-green-500/30' },
+  { name: 'Mercado Pago', gradient: 'from-sky-700 via-sky-600 to-blue-950', badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
+  { name: 'PagBank', gradient: 'from-emerald-700 via-emerald-650 to-teal-950', badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  { name: 'PicPay', gradient: 'from-emerald-600 via-emerald-500 to-green-900', badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  { name: 'BTG Pactual', gradient: 'from-blue-900 via-blue-800 to-slate-950', badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+  { name: 'XP Investimentos', gradient: 'from-yellow-500 via-amber-400 to-zinc-950', badgeColor: 'bg-yellow-500/20 text-yellow-350 border-yellow-500/30' },
+  { name: 'Stone', gradient: 'from-green-600 via-green-555 to-emerald-95', badgeColor: 'bg-green-500/20 text-green-300 border-green-500/30' },
+  { name: 'Safra', gradient: 'from-amber-700 via-yellow-600 to-zinc-950', badgeColor: 'bg-amber-600/20 text-amber-300 border-amber-600/30' },
   { name: 'Outro', gradient: 'from-teal-800 via-teal-700 to-emerald-900', badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
 ];
 

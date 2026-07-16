@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Star, X, Wallet as WalletIcon, ShieldCheck, CreditCard } from 'lucide-react';
+import { Plus, Trash2, Star, X, Wallet as WalletIcon, ShieldCheck, CreditCard, Edit2 } from 'lucide-react';
 import { validatePixKey, maskPixKey, BANKS } from '../utils/pix';
 import type { PixKeyType, Wallet, WalletType } from '../utils/pix';
 import { supabase } from '../utils/supabaseClient';
@@ -41,6 +41,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
   const [keys, setKeys] = useState<Wallet[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
+  const [editingWallet, setEditingWallet] = useState<Wallet | null>(null);
   
   // Form State
   const [walletType, setWalletType] = useState<WalletType>('PIX');
@@ -99,6 +100,20 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
     setType(newType);
     setKeyValue('');
     setErrors(prev => ({ ...prev, key: '' }));
+  };
+
+  const handleEdit = (w: Wallet) => {
+    setEditingWallet(w);
+    setWalletType(w.walletType);
+    setLabel(w.label);
+    setBankName(w.bankName || 'Nubank');
+    setType(w.type || 'CPF');
+    setKeyValue(w.key || '');
+    setReceiverName(w.name || '');
+    setReceiverCity(w.city || '');
+    setCardProvider(w.cardProvider || 'Stripe');
+    setAccountIdentifier(w.accountIdentifier || '');
+    setIsAdding(true);
   };
 
   const handleSetPrimary = async (id: string) => {
@@ -191,11 +206,14 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
     }
 
     try {
-      let walletData: Omit<Wallet, 'id'> & { id?: string };
+      const walletId = editingWallet ? editingWallet.id : crypto.randomUUID();
+      const isPrimaryValue = editingWallet ? editingWallet.isPrimary : keys.length === 0;
+
+      let walletData: Wallet;
 
       if (walletType === 'PIX') {
         walletData = {
-          id: crypto.randomUUID(),
+          id: walletId,
           walletType: 'PIX',
           type,
           key: keyValue.trim(),
@@ -203,11 +221,11 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
           city: receiverCity.trim().toUpperCase(),
           label: label.trim(),
           bankName,
-          isPrimary: keys.length === 0,
+          isPrimary: isPrimaryValue,
         };
       } else if (walletType === 'PIX_AUTO') {
         walletData = {
-          id: crypto.randomUUID(),
+          id: walletId,
           walletType: 'PIX_AUTO',
           type: 'RANDOM',
           key: 'automatico',
@@ -215,11 +233,11 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
           city: 'SAO PAULO',
           label: label.trim(),
           bankName: 'MandaPIX',
-          isPrimary: keys.length === 0,
+          isPrimary: isPrimaryValue,
         };
       } else {
         walletData = {
-          id: crypto.randomUUID(),
+          id: walletId,
           walletType,
           type: 'RANDOM',
           key: accountIdentifier.trim(),
@@ -229,16 +247,25 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
           bankName: 'Outro',
           cardProvider,
           accountIdentifier: accountIdentifier.trim(),
-          isPrimary: keys.length === 0,
+          isPrimary: isPrimaryValue,
         };
       }
 
-      // Salvar no Supabase
-      const { error } = await supabase
-        .from('wallets')
-        .insert([mapToDB(walletData)]);
+      // Salvar ou Atualizar no Supabase
+      if (editingWallet) {
+        const { error } = await supabase
+          .from('wallets')
+          .update(mapToDB(walletData))
+          .eq('id', editingWallet.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('wallets')
+          .insert([mapToDB(walletData)]);
+
+        if (error) throw error;
+      }
 
       // Resetar Form
       setLabel('');
@@ -248,6 +275,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
       setAccountIdentifier('');
       setWalletType('PIX');
       setIsAdding(false);
+      setEditingWallet(null);
       setErrors({});
       
       await loadKeys();
@@ -279,7 +307,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
         </div>
         {!isAdding && !loading && (
           <button
-            onClick={() => setIsAdding(true)}
+            onClick={() => { setEditingWallet(null); setIsAdding(true); }}
             className="flex items-center gap-1 bg-pix text-white px-3 py-1.5 rounded-full text-xs font-semibold hover:bg-pix-dark transition-all shadow-md shadow-pix/10 tap-highlight-transparent active:scale-95"
           >
             <Plus className="w-3.5 h-3.5" /> Adicionar
@@ -299,7 +327,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-slate-800 text-sm">Nova Carteira de Recebimento</h3>
               <button 
-                onClick={() => { setIsAdding(false); setErrors({}); }}
+                onClick={() => { setIsAdding(false); setEditingWallet(null); setErrors({}); }}
                 className="text-slate-400 hover:text-slate-650 p-1"
               >
                 <X className="w-5 h-5" />
@@ -493,12 +521,11 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                   </div>
                 </div>
               )}
-
               <button
                 type="submit"
                 className="w-full bg-pix text-white py-2.5 rounded-xl font-bold hover:bg-pix-dark transition-all mt-4 shadow-md shadow-pix/10 tap-highlight-transparent active:scale-98"
               >
-                Salvar Carteira
+                {editingWallet ? 'Salvar Alterações' : 'Salvar Carteira'}
               </button>
             </form>
           </div>
@@ -512,7 +539,7 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
               Cadastre suas carteiras PIX ou de Cartões para gerar faturamentos instantâneos.
             </p>
             <button
-              onClick={() => setIsAdding(true)}
+              onClick={() => { setEditingWallet(null); setIsAdding(true); }}
               className="bg-pix text-white px-5 py-2.5 rounded-full font-bold shadow-md shadow-pix/10 hover:bg-pix-dark transition-all tap-highlight-transparent active:scale-95"
             >
               Criar Primeira Carteira
@@ -557,6 +584,13 @@ export const SavedKeys: React.FC<SavedKeysProps> = ({ onKeysChanged }) => {
                     </div>
 
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleEdit(k)}
+                        title="Editar carteira"
+                        className="p-1.5 rounded-lg text-slate-300 hover:text-pix hover:bg-slate-50 transition-all"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
                       {!k.isPrimary && (
                         <button
                           onClick={() => handleSetPrimary(k.id)}

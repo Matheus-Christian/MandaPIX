@@ -10,7 +10,7 @@ import {
   ShoppingCart, 
   CalendarClock 
 } from 'lucide-react';
-import { formatBRL } from '../utils/pix';
+import { formatBRL, parseScheduledDate } from '../utils/pix';
 import type { Order } from '../utils/pix';
 
 interface DashboardCalendarProps {
@@ -250,7 +250,7 @@ export const DashboardCalendar: React.FC<DashboardCalendarProps> = ({
               <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
                 <div className="space-y-1">
                   <span className="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" /> {isClinica ? 'Data da Consulta' : 'Data do Pedido'}
+                    <Calendar className="w-3.5 h-3.5" /> {isClinica ? 'Atendimento Dia' : 'Data do Pedido'}
                   </span>
                   <p className="text-xs font-bold text-slate-700">
                     {new Date(selectedOrder.dateCreated).toLocaleDateString('pt-BR')} às {new Date(selectedOrder.dateCreated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -277,10 +277,10 @@ export const DashboardCalendar: React.FC<DashboardCalendarProps> = ({
                   <div>
                     <p className="text-[9px] font-black text-pix uppercase tracking-wide">{isClinica ? 'Consulta Agendada' : 'Pedido Agendado'}</p>
                     <p className="text-xs font-bold text-slate-800 mt-0.5">
-                      {new Date(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                      {parseScheduledDate(selectedOrder.scheduledAt).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
                     </p>
                     <p className="text-[10px] text-slate-500 font-semibold">
-                      {new Date(selectedOrder.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      {parseScheduledDate(selectedOrder.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>

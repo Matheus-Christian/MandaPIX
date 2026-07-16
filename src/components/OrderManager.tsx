@@ -5,6 +5,7 @@ import type { Order, Invoice, ProductService, ScheduleSlot, ScheduleCalendar, Cl
 import { supabase } from '../utils/supabaseClient';
 
 interface BookingData {
+  clientId?: string;
   clientName: string;
   clientPhone: string;
   clientDocument: string;
@@ -14,6 +15,7 @@ interface BookingData {
   slotId: string;
   calendarId: string;
   scheduledAt: string;
+  productServiceId?: string;
 }
 
 interface OrderManagerProps {
@@ -142,6 +144,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
     setIsSubmittingBooking(true);
     try {
       await onCreateBooking({
+        clientId: bookingClientMode === 'existing' ? bookingSelectedClientId : undefined,
         clientName: finalClientName,
         clientPhone: finalClientPhone,
         clientDocument: finalClientDoc,
@@ -151,6 +154,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
         slotId: selectedSlot.id,
         calendarId: cal.id,
         scheduledAt: `${selectedSlot.slotDate}T${selectedSlot.slotTime}:00`,
+        productServiceId: bookingServiceId || undefined,
       });
       setShowBookingModal(false);
     } finally {
@@ -1070,7 +1074,7 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
               <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
                 <div className="space-y-1">
                   <span className="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" /> {isClinica ? 'Data da Consulta' : 'Data do Pedido'}
+                    <Calendar className="w-3.5 h-3.5" /> {isClinica ? 'Atendimento Dia' : 'Data do Pedido'}
                   </span>
                   <p className="text-xs font-bold text-slate-700">
                     {new Date(selectedOrder.dateCreated).toLocaleDateString('pt-BR')} às {new Date(selectedOrder.dateCreated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}

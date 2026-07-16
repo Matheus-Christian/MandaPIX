@@ -709,6 +709,9 @@ export const InvoiceManager: React.FC<InvoiceManagerProps> = ({
 
   // Map client helper
   const getClientName = (id: string) => {
+    if (id && id.startsWith('mock-client-')) {
+      return id.replace('mock-client-', '');
+    }
     const cli = clients.find(c => c.id === id);
     return cli ? cli.name : 'Cliente Excluído';
   };

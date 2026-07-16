@@ -25,9 +25,11 @@ import {
 } from 'react-router-dom';
 
 import { 
-  formatBRL
+  formatBRL,
+  generatePixPayload,
+  routePixPayment
 } from './utils/pix';
-import type { SavedPixKey, Client, Employee, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar, EcommerceSettings } from './utils/pix';
+import type { SavedPixKey, Client, Employee, ProductService, Invoice, Catalog, Store, Order, ScheduleSlot, ScheduleCalendar, EcommerceSettings, Wallet } from './utils/pix';
 import { DEFAULT_EMPLOYEES } from './utils/pix';
 
 import { VirtualCard } from './components/VirtualCard';
@@ -154,6 +156,14 @@ function MandaPixApp() {
     const saved = localStorage.getItem('mandapix_active_subtab');
     return (saved as any) || 'orders';
   });
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('mandapix_active_subtab', activeSubTab);
+  }, [activeSubTab]);
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('mandapix_expanded_modules');
     if (saved) {
@@ -357,6 +367,24 @@ function MandaPixApp() {
 
   useEffect(() => {
     if (activeBranch?.config?.main_screen) {
+      const savedSubTab = localStorage.getItem('mandapix_active_subtab');
+      if (savedSubTab) {
+        let allowed = true;
+        if (activeEmployee) {
+          if (activeEmployee.role === 'GERENTE') {
+            if (savedSubTab === 'ecommerce' || savedSubTab === 'cobranças') allowed = false;
+          } else if (activeEmployee.role === 'VENDEDOR') {
+            if (!['pdv', 'orders', 'schedule'].includes(savedSubTab)) allowed = false;
+          } else if (activeEmployee.role === 'ATENDENTE') {
+            if (!['orders', 'invoices', 'clients', 'catalogs', 'schedule'].includes(savedSubTab)) allowed = false;
+          }
+        }
+        if (allowed) {
+          setActiveSubTab(savedSubTab as any);
+          return;
+        }
+      }
+
       const targetTab = activeBranch.config.main_screen;
       let allowed = true;
       if (activeEmployee) {
@@ -807,8 +835,38 @@ function MandaPixApp() {
     }
   };
 
+  const getPixPayloadHelper = (key: Wallet, amount: number, description: string) => {
+    if (key.walletType === 'PIX') {
+      return generatePixPayload({
+        key: key.key || '',
+        keyType: key.type || 'RANDOM',
+        name: key.name || '',
+        city: key.city || 'SAO PAULO',
+        amount: amount,
+        description: description.substring(0, 72)
+      });
+    } else if (key.walletType === 'PIX_AUTO') {
+      const route = routePixPayment(amount, routingSettings || {
+        threshold: 100,
+        below: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-abaixo@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-abaixo@mandapix.com' } },
+        above: { asaas: { fixed: 0.99, percent: 0, key: 'asaas-acima@mandapix.com' }, efi: { fixed: 0, percent: 1.19, key: 'efi-acima@mandapix.com' } }
+      });
+      return generatePixPayload({
+        key: route.key,
+        keyType: route.key.includes('@') ? 'EMAIL' : 'RANDOM',
+        name: `MandaPIX Central (${route.gateway})`,
+        city: 'SAO PAULO',
+        amount: route.total,
+        description: description.substring(0, 72)
+      });
+    } else {
+      return `card_payment_token_${Date.now()}_${amount}`;
+    }
+  };
+
   // Cria um agendamento (consulta/pedido) diretamente a partir da view de Agenda
   const handleCreateBooking = async (booking: {
+    clientId?: string;
     clientName: string;
     clientPhone: string;
     clientDocument: string;
@@ -818,14 +876,76 @@ function MandaPixApp() {
     slotId: string;
     calendarId: string;
     scheduledAt: string;
+    productServiceId?: string;
   }) => {
     if (!activeStoreId) return;
     try {
-      // Generate order number
+      // 1. Obter ou Criar o Cliente
+      let finalClientId = booking.clientId;
+      if (!finalClientId) {
+        const { data: newClient, error: clientErr } = await supabase
+          .from('clients')
+          .insert([{
+            store_id: activeStoreId,
+            name: booking.clientName,
+            document: booking.clientDocument || '000.000.000-00',
+            email: '',
+            phone: booking.clientPhone || '',
+          }])
+          .select()
+          .single();
+        if (clientErr) throw clientErr;
+        finalClientId = newClient.id;
+      }
+
+      // 2. Obter a carteira principal para associar à cobrança
+      const primaryWallet = savedKeys.find(k => k.isPrimary) || savedKeys[0] || null;
+      const walletId = primaryWallet ? primaryWallet.id : null;
+
+      // 3. Gerar número do faturamento/pedido
       const existingOrders = orders.filter(o => o.storeId === activeStoreId);
       const maxNum = existingOrders.reduce((max, o) => Math.max(max, parseInt(o.orderNumber, 10) || 0), 1000);
       const newOrderNumber = String(maxNum + 1);
 
+      // 4. Inserir Fatura (Cobrança)
+      const { data: invData, error: invError } = await supabase
+        .from('invoices')
+        .insert([{
+          store_id: activeStoreId,
+          invoice_number: newOrderNumber,
+          client_id: finalClientId,
+          product_service_id: booking.productServiceId || null,
+          description: booking.serviceName,
+          total_amount: booking.servicePrice,
+          installments_count: 1,
+          wallet_id: walletId,
+          payment_method_used: 'PIX'
+        }])
+        .select()
+        .single();
+
+      if (invError) throw invError;
+
+      // Gerar o Payload do PIX dinamicamente usando a carteira principal
+      const generatedPixPayload = primaryWallet
+        ? getPixPayloadHelper(primaryWallet, booking.servicePrice, `CN-${newOrderNumber} P1`)
+        : '';
+
+      // 5. Inserir Parcela
+      const { error: instError } = await supabase
+        .from('installments')
+        .insert([{
+          invoice_id: invData.id,
+          number: 1,
+          amount: booking.servicePrice,
+          due_date: booking.scheduledAt.split('T')[0],
+          status: 'PENDENTE',
+          pix_payload: generatedPixPayload
+        }]);
+
+      if (instError) throw instError;
+
+      // 6. Inserir Pedido correspondente linkado à fatura
       const { error: orderError } = await supabase
         .from('orders')
         .insert([{
@@ -836,23 +956,22 @@ function MandaPixApp() {
           client_email: '',
           client_document: booking.clientDocument,
           items: [{
-            productServiceId: '',
+            productServiceId: booking.productServiceId || '',
             name: booking.serviceName,
             quantity: 1,
             price: booking.servicePrice,
           }],
           total_amount: booking.servicePrice,
           status: isClinica ? 'PENDENTE' : 'AGENDADO',
+          invoice_id: invData.id,
           scheduled_at: booking.scheduledAt,
           schedule_slot_id: booking.slotId,
           schedule_calendar_id: booking.calendarId,
-        }])
-        .select()
-        .single();
+        }]);
 
       if (orderError) throw orderError;
 
-      // Increment slot booking count
+      // 7. Incrementar contagem no slot
       const slot = scheduleSlots.find(s => s.id === booking.slotId);
       if (slot) {
         await supabase
@@ -861,8 +980,10 @@ function MandaPixApp() {
           .eq('id', booking.slotId);
       }
 
+      await loadInvoices();
       await loadOrders();
       await loadScheduleData();
+      await loadClients();
     } catch (err) {
       console.error('Erro ao criar agendamento:', err);
       throw err;
@@ -1334,6 +1455,20 @@ function MandaPixApp() {
 
   const handleEditInvoice = async (updatedInvoice: Invoice) => {
     try {
+      if (updatedInvoice.id.startsWith('synth-inv-')) {
+        const orderId = updatedInvoice.id.replace('synth-inv-', '');
+        const { error } = await supabase
+          .from('orders')
+          .update({
+            total_amount: updatedInvoice.totalAmount,
+            items: [{ productServiceId: '', name: updatedInvoice.description, quantity: 1, price: updatedInvoice.totalAmount }]
+          })
+          .eq('id', orderId);
+        if (error) throw error;
+        await loadOrders();
+        return;
+      }
+
       const { error } = await supabase
         .from('invoices')
         .update({
@@ -1353,6 +1488,17 @@ function MandaPixApp() {
 
   const handleDeleteInvoice = async (id: string) => {
     try {
+      if (id.startsWith('synth-inv-')) {
+        const orderId = id.replace('synth-inv-', '');
+        const { error } = await supabase
+          .from('orders')
+          .delete()
+          .eq('id', orderId);
+        if (error) throw error;
+        await loadOrders();
+        return;
+      }
+
       const { error } = await supabase
         .from('invoices')
         .delete()
@@ -1372,6 +1518,20 @@ function MandaPixApp() {
     paymentMethodUsed?: 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD'
   ) => {
     try {
+      if (invoiceId.startsWith('synth-inv-')) {
+        const orderId = invoiceId.replace('synth-inv-', '');
+        const newStatus = status === 'PAGO' 
+          ? (isClinica ? 'ATENDIDO' : 'APROVADO') 
+          : (isClinica ? 'PENDENTE' : 'AGENDADO');
+        const { error } = await supabase
+          .from('orders')
+          .update({ status: newStatus })
+          .eq('id', orderId);
+        if (error) throw error;
+        await loadOrders();
+        return;
+      }
+
       const { error } = await supabase
         .from('installments')
         .update({
@@ -2709,7 +2869,48 @@ function MandaPixApp() {
 
                 {activeSubTab === 'invoices' && (
                   <InvoiceManager
-                    invoices={invoices.filter(inv => inv.storeId === activeStoreId)}
+                    invoices={[
+                      ...invoices.filter(inv => inv.storeId === activeStoreId),
+                      ...orders
+                        .filter(o => o.storeId === activeStoreId && !o.invoiceId && o.scheduledAt)
+                        .map(o => {
+                          const clientObj = clients.find(c => c.name.toLowerCase() === o.clientName.toLowerCase() || (o.clientDocument && c.document === o.clientDocument));
+                          const clientId = clientObj ? clientObj.id : `mock-client-${o.clientName}`;
+                          const dueDate = o.scheduledAt ? o.scheduledAt.split('T')[0] : new Date().toISOString().split('T')[0];
+                          const instStatus = o.status === 'APROVADO' || o.status === 'ATENDIDO' || o.status === 'Concluída' ? 'PAGO' : 'PENDENTE';
+                          
+                          const primaryWallet = savedKeys.find(k => k.isPrimary) || savedKeys[0] || null;
+                          const generatedPixPayload = primaryWallet
+                            ? getPixPayloadHelper(primaryWallet, o.totalAmount, `CN-${o.orderNumber} P1`)
+                            : '';
+
+                          return {
+                            id: `synth-inv-${o.id}`,
+                            storeId: o.storeId,
+                            invoiceNumber: o.orderNumber,
+                            clientId: clientId,
+                            description: o.items && o.items[0] ? o.items[0].name : 'Consulta/Agendamento',
+                            totalAmount: o.totalAmount,
+                            dateCreated: o.dateCreated ? o.dateCreated.split('T')[0] : new Date().toISOString().split('T')[0],
+                            installmentsCount: 1,
+                            pixKeyId: primaryWallet?.id || '',
+                            walletId: primaryWallet?.id || '',
+                            paymentMethodUsed: 'PIX' as const,
+                            scheduledAt: o.scheduledAt,
+                            scheduleSlotId: o.scheduleSlotId,
+                            scheduleCalendarId: scheduleSlots.find(s => s.id === o.scheduleSlotId)?.calendarId,
+                            installments: [{
+                              id: `synth-inst-${o.id}`,
+                              number: 1,
+                              amount: o.totalAmount,
+                              dueDate: dueDate,
+                              status: instStatus as 'PAGO' | 'PENDENTE',
+                              pixPayload: generatedPixPayload,
+                              confirmedDate: o.status === 'APROVADO' || o.status === 'ATENDIDO' || o.status === 'Concluída' ? dueDate : undefined,
+                            }]
+                          };
+                        })
+                    ]}
                     clients={clients.filter(c => c.storeId === activeStoreId)}
                     products={products.filter(p => {
                       const cat = catalogs.find(c => c.id === p.catalogId);

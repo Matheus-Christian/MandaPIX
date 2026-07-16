@@ -818,6 +818,68 @@ function MandaPixApp() {
     }
   };
 
+  // Cria um agendamento (consulta/pedido) diretamente a partir da view de Agenda
+  const handleCreateBooking = async (booking: {
+    clientName: string;
+    clientPhone: string;
+    clientDocument: string;
+    serviceName: string;
+    servicePrice: number;
+    notes: string;
+    slotId: string;
+    calendarId: string;
+    scheduledAt: string;
+  }) => {
+    if (!activeStoreId) return;
+    try {
+      // Generate order number
+      const existingOrders = orders.filter(o => o.storeId === activeStoreId);
+      const maxNum = existingOrders.reduce((max, o) => Math.max(max, parseInt(o.orderNumber, 10) || 0), 1000);
+      const newOrderNumber = String(maxNum + 1);
+
+      const { error: orderError } = await supabase
+        .from('orders')
+        .insert([{
+          store_id: activeStoreId,
+          order_number: newOrderNumber,
+          client_name: booking.clientName,
+          client_phone: booking.clientPhone,
+          client_email: '',
+          client_document: booking.clientDocument,
+          items: [{
+            productServiceId: '',
+            name: booking.serviceName,
+            quantity: 1,
+            price: booking.servicePrice,
+          }],
+          total_amount: booking.servicePrice,
+          status: isClinica ? 'PENDENTE' : 'AGENDADO',
+          scheduled_at: booking.scheduledAt,
+          schedule_slot_id: booking.slotId,
+          schedule_calendar_id: booking.calendarId,
+        }])
+        .select()
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Increment slot booking count
+      const slot = scheduleSlots.find(s => s.id === booking.slotId);
+      if (slot) {
+        await supabase
+          .from('schedule_slots')
+          .update({ current_bookings: slot.currentBookings + 1 })
+          .eq('id', booking.slotId);
+      }
+
+      await loadOrders();
+      await loadScheduleData();
+    } catch (err) {
+      console.error('Erro ao criar agendamento:', err);
+      throw err;
+    }
+  };
+
   useEffect(() => {
     const initSessionAndLoad = async () => {
       if (!user) {
@@ -2673,6 +2735,14 @@ function MandaPixApp() {
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     activeBranch={activeBranch}
                     isClinica={isClinica}
+                    products={products.filter(p => {
+                      const cat = catalogs.find(c => c.id === p.catalogId);
+                      return cat && cat.storeId === activeStoreId;
+                    })}
+                    scheduleSlots={scheduleSlots.filter(s => s.storeId === activeStoreId)}
+                    scheduleCalendars={scheduleCalendars.filter(c => c.storeId === activeStoreId)}
+                    clients={clients.filter(c => c.storeId === activeStoreId)}
+                    onCreateBooking={handleCreateBooking}
                   />
                 )}
 

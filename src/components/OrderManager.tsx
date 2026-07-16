@@ -1,8 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays, Sparkles, Minus, Plus } from 'lucide-react';
+import { Search, Eye, Ban, Calendar, User, Mail, Phone, FileText, CheckCircle, Clock, X, ShoppingCart, Truck, Package, CalendarClock, ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays, Sparkles, Minus, Plus, CalendarPlus, Stethoscope } from 'lucide-react';
 import { formatBRL, parseScheduledDate } from '../utils/pix';
-import type { Order, Invoice, ProductService } from '../utils/pix';
+import type { Order, Invoice, ProductService, ScheduleSlot, ScheduleCalendar, Client } from '../utils/pix';
 import { supabase } from '../utils/supabaseClient';
+
+interface BookingData {
+  clientName: string;
+  clientPhone: string;
+  clientDocument: string;
+  serviceName: string;
+  servicePrice: number;
+  notes: string;
+  slotId: string;
+  calendarId: string;
+  scheduledAt: string;
+}
 
 interface OrderManagerProps {
   orders: Order[];
@@ -18,6 +30,11 @@ interface OrderManagerProps {
   activeBranch?: any;
   products?: ProductService[];
   isClinica?: boolean;
+  // Scheduling props
+  scheduleSlots?: ScheduleSlot[];
+  scheduleCalendars?: ScheduleCalendar[];
+  clients?: Client[];
+  onCreateBooking?: (booking: BookingData) => Promise<void>;
 }
 
 export const OrderManager: React.FC<OrderManagerProps> = ({
@@ -28,11 +45,119 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
   onUpdateInstallmentStatus,
   activeBranch,
   products,
-  isClinica = false
+  isClinica = false,
+  scheduleSlots = [],
+  scheduleCalendars = [],
+  clients = [],
+  onCreateBooking,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  
+
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingSlot, setBookingSlot] = useState<ScheduleSlot | null>(null);
+  const [bookingCalendar, setBookingCalendar] = useState<ScheduleCalendar | null>(null);
+  const [bookingClientMode, setBookingClientMode] = useState<'existing' | 'new'>('existing');
+  const [bookingSelectedClientId, setBookingSelectedClientId] = useState('');
+  const [bookingClientName, setBookingClientName] = useState('');
+  const [bookingClientPhone, setBookingClientPhone] = useState('');
+  const [bookingClientDoc, setBookingClientDoc] = useState('');
+  const [bookingServiceId, setBookingServiceId] = useState('');
+  const [bookingServiceCustomName, setBookingServiceCustomName] = useState('');
+  const [bookingServiceCustomPrice, setBookingServiceCustomPrice] = useState(0);
+  const [bookingNotes, setBookingNotes] = useState('');
+  const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
+
+  const openBookingModal = (slot?: ScheduleSlot) => {
+    setBookingSlot(slot || null);
+    if (slot) {
+      const cal = scheduleCalendars.find(c => c.id === slot.calendarId);
+      setBookingCalendar(cal || null);
+    } else {
+      // pick first enabled calendar with available slots
+      const firstCal = scheduleCalendars.find(cal => cal.isEnabled) || scheduleCalendars[0] || null;
+      setBookingCalendar(firstCal);
+    }
+    setBookingClientMode('existing');
+    setBookingSelectedClientId('');
+    setBookingClientName('');
+    setBookingClientPhone('');
+    setBookingClientDoc('');
+    setBookingServiceId('');
+    setBookingServiceCustomName('');
+    setBookingServiceCustomPrice(0);
+    setBookingNotes('');
+    setShowBookingModal(true);
+  };
+
+  // When calendar is selected (no slot yet), pick first available slot for that calendar
+  const [bookingSelectedSlotId, setBookingSelectedSlotId] = useState('');
+  const slotsForBookingCalendar = useMemo(() => {
+    if (!bookingCalendar) return [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().slice(0, 10);
+    return scheduleSlots
+      .filter(s =>
+        s.calendarId === bookingCalendar.id &&
+        s.isEnabled &&
+        s.currentBookings < s.maxCapacity &&
+        s.slotDate >= todayStr
+      )
+      .sort((a, b) => `${a.slotDate}${a.slotTime}`.localeCompare(`${b.slotDate}${b.slotTime}`));
+  }, [bookingCalendar, scheduleSlots]);
+
+  const handleSubmitBooking = async () => {
+    if (!onCreateBooking) return;
+    const selectedSlot = bookingSlot || scheduleSlots.find(s => s.id === bookingSelectedSlotId);
+    if (!selectedSlot) return;
+    const cal = scheduleCalendars.find(c => c.id === selectedSlot.calendarId);
+    if (!cal) return;
+
+    let finalClientName = bookingClientName;
+    let finalClientPhone = bookingClientPhone;
+    let finalClientDoc = bookingClientDoc;
+    if (bookingClientMode === 'existing' && bookingSelectedClientId) {
+      const cl = clients.find(c => c.id === bookingSelectedClientId);
+      if (cl) {
+        finalClientName = cl.name;
+        finalClientPhone = cl.phone || '';
+        finalClientDoc = cl.document || '';
+      }
+    }
+    if (!finalClientName.trim()) return;
+
+    let serviceName = bookingServiceCustomName;
+    let servicePrice = bookingServiceCustomPrice;
+    if (bookingServiceId) {
+      const prod = products?.find(p => p.id === bookingServiceId);
+      if (prod) {
+        serviceName = prod.name;
+        servicePrice = prod.price;
+      }
+    }
+    if (!serviceName.trim()) return;
+
+    setIsSubmittingBooking(true);
+    try {
+      await onCreateBooking({
+        clientName: finalClientName,
+        clientPhone: finalClientPhone,
+        clientDocument: finalClientDoc,
+        serviceName,
+        servicePrice,
+        notes: bookingNotes,
+        slotId: selectedSlot.id,
+        calendarId: cal.id,
+        scheduledAt: `${selectedSlot.slotDate}T${selectedSlot.slotTime}:00`,
+      });
+      setShowBookingModal(false);
+    } finally {
+      setIsSubmittingBooking(false);
+    }
+  };
+
   // Checkout comissão state
   const [checkoutOrder, setCheckoutOrder] = useState<Order | null>(null);
   const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
@@ -754,26 +879,48 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
         {/* AGENDA MODE */}
         {viewMode === 'AGENDA' && (
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col flex-1 min-h-[500px]">
-            {/* Week navigation */}
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <button 
-                onClick={() => setAgendaWeekOffset(w => w - 1)} 
-                className="p-2 rounded-xl hover:bg-slate-100 border border-slate-200 text-slate-500 transition-all active:scale-95 flex items-center justify-center"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="text-center">
-                <p className="font-extrabold text-slate-800 text-sm">
-                  {dateRangeLabel}
-                </p>
-                {agendaWeekOffset === 0 && <span className="text-[9px] font-black text-pix uppercase tracking-wide">Semana Atual</span>}
+            {/* Book button + week navigation */}
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+              {/* Agendar button */}
+              {onCreateBooking && scheduleCalendars.length > 0 && (
+                <button
+                  onClick={() => openBookingModal()}
+                  className="flex items-center gap-1.5 bg-pix hover:bg-pix-dark text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 flex-shrink-0 group"
+                  title={isClinica ? 'Agendar nova consulta' : 'Agendar novo pedido'}
+                >
+                  <CalendarPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                  <span className="hidden sm:inline">{isClinica ? 'Agendar Consulta' : 'Agendar Pedido'}</span>
+                  <span className="sm:hidden">{isClinica ? 'Consulta' : 'Pedido'}</span>
+                </button>
+              )}
+              {/* Week nav */}
+              <div className="flex items-center gap-2 flex-1 justify-center">
+                <button 
+                  onClick={() => setAgendaWeekOffset(w => w - 1)} 
+                  className="p-2 rounded-xl hover:bg-slate-100 border border-slate-200 text-slate-500 transition-all active:scale-95 flex items-center justify-center"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="text-center min-w-[160px]">
+                  <p className="font-extrabold text-slate-800 text-sm">
+                    {dateRangeLabel}
+                  </p>
+                  {agendaWeekOffset === 0 && <span className="text-[9px] font-black text-pix uppercase tracking-wide">Semana Atual</span>}
+                </div>
+                <button 
+                  onClick={() => setAgendaWeekOffset(w => w + 1)} 
+                  className="p-2 rounded-xl hover:bg-slate-100 border border-slate-200 text-slate-500 transition-all active:scale-95 flex items-center justify-center"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
-              <button 
-                onClick={() => setAgendaWeekOffset(w => w + 1)} 
-                className="p-2 rounded-xl hover:bg-slate-100 border border-slate-200 text-slate-500 transition-all active:scale-95 flex items-center justify-center"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              {/* Legend */}
+              {scheduleSlots.length > 0 && (
+                <div className="hidden md:flex items-center gap-3 text-[9px] font-bold text-slate-400 uppercase tracking-wide flex-shrink-0">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 block" />Livre</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 block" />Agend.</span>
+                </div>
+              )}
             </div>
 
             {/* Weekly columns grid */}
@@ -799,45 +946,97 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                     </div>
 
                     {/* Day Cards list */}
-                    <div className="flex-1 p-2 space-y-2 overflow-y-auto no-scrollbar max-h-[calc(100vh-320px)]">
-                      {dayOrders.length === 0 ? (
-                        <div className="text-center py-12 text-slate-300 text-[10px] font-semibold italic">
-                          Sem agendamentos
-                        </div>
-                      ) : (
-                        dayOrders.map(order => {
-                          const statusConfig = getStatusBadgeClass(order.status);
-                          const orderTime = order.scheduledAt ? order.scheduledAt.split('T')[1]?.substring(0, 5) || '' : '';
-
+                    <div className="flex-1 p-2 space-y-1.5 overflow-y-auto no-scrollbar max-h-[calc(100vh-320px)]">
+                      {dayOrders.length === 0 && (() => {
+                        // Check for available schedule slots on this day
+                        const dayAvailableSlots = scheduleSlots.filter(
+                          s => s.slotDate === dateStr && s.isEnabled && s.currentBookings < s.maxCapacity
+                        );
+                        if (dayAvailableSlots.length === 0) {
                           return (
-                            <div
-                              key={order.id}
-                              onClick={() => setSelectedOrder(order)}
-                              className="bg-white p-2.5 rounded-xl border border-slate-150 shadow-xs hover:shadow-sm hover:border-pix/20 transition-all cursor-pointer space-y-1.5 group select-none text-left"
-                            >
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="font-black text-[10px] text-slate-800 flex items-center gap-0.5">
-                                  <Clock className="w-3 h-3 text-slate-400" /> {orderTime}
-                                </span>
-                                <span className="font-extrabold text-[9px] text-slate-450">#{order.orderNumber}</span>
-                              </div>
-                              <div className="space-y-0.5">
-                                <p className="font-bold text-[10px] text-slate-700 line-clamp-1 group-hover:text-pix transition-colors">
-                                  {order.clientName}
-                                </p>
-                                <p className="text-[9px] text-slate-400 line-clamp-2 leading-tight">
-                                  {order.items.map(it => `${it.quantity}x ${it.name}`).join(', ')}
-                                </p>
-                              </div>
-                              <div className="flex items-center justify-between border-t border-slate-50 pt-1.5">
-                                <span className="font-black text-[10px] text-slate-800">{formatBRL(order.totalAmount)}</span>
-                                <span className={`px-1.5 py-0.5 rounded-full border text-[8px] font-bold uppercase scale-90 ${statusConfig}`}>
-                                  {formatStatusLabel(order.status).substring(0, 5)}
-                                </span>
-                              </div>
+                            <div className="text-center py-12 text-slate-300 text-[10px] font-semibold italic">
+                              Sem agendamentos
                             </div>
                           );
-                        })
+                        }
+                        return null;
+                      })()}
+
+                      {/* Available free slots (clickable to book) */}
+                      {!isPast && (() => {
+                        const dayFreeSlots = scheduleSlots.filter(
+                          s => s.slotDate === dateStr && s.isEnabled && s.currentBookings < s.maxCapacity
+                        ).sort((a, b) => a.slotTime.localeCompare(b.slotTime));
+
+                        const bookedTimes = new Set(dayOrders.map(o => o.scheduledAt?.split('T')[1]?.substring(0, 5)));
+
+                        return dayFreeSlots
+                          .filter(s => !bookedTimes.has(s.slotTime))
+                          .map(slot => {
+                            const remaining = slot.maxCapacity - slot.currentBookings;
+                            return (
+                              <button
+                                key={`free-${slot.id}`}
+                                onClick={() => onCreateBooking && openBookingModal(slot)}
+                                disabled={!onCreateBooking}
+                                className="w-full text-left p-2 rounded-lg border border-dashed border-emerald-200 bg-emerald-50/60 hover:bg-emerald-50 hover:border-emerald-400 transition-all group/slot disabled:opacity-50 disabled:cursor-default"
+                                title={onCreateBooking ? `Clique para ${isClinica ? 'agendar consulta' : 'agendar pedido'} às ${slot.slotTime}` : ''}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                                  <span className="font-mono font-black text-[10px] text-emerald-700">{slot.slotTime}</span>
+                                  {onCreateBooking && (
+                                    <CalendarPlus className="w-3 h-3 text-emerald-400 ml-auto opacity-0 group-hover/slot:opacity-100 transition-opacity" />
+                                  )}
+                                </div>
+                                <div className="text-[8px] text-emerald-600 font-semibold mt-0.5 pl-3">
+                                  {remaining} vaga{remaining !== 1 ? 's' : ''} livre{remaining !== 1 ? 's' : ''}
+                                </div>
+                              </button>
+                            );
+                          });
+                      })()}
+
+                      {/* Booked order cards */}
+                      {dayOrders.map(order => {
+                        const statusConfig = getStatusBadgeClass(order.status);
+                        const orderTime = order.scheduledAt ? order.scheduledAt.split('T')[1]?.substring(0, 5) || '' : '';
+
+                        return (
+                          <div
+                            key={order.id}
+                            onClick={() => setSelectedOrder(order)}
+                            className="bg-white p-2.5 rounded-xl border border-slate-150 shadow-xs hover:shadow-sm hover:border-pix/20 transition-all cursor-pointer space-y-1.5 group select-none text-left"
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-black text-[10px] text-slate-800 flex items-center gap-0.5">
+                                <Clock className="w-3 h-3 text-slate-400" /> {orderTime}
+                              </span>
+                              <span className="font-extrabold text-[9px] text-slate-450">#{order.orderNumber}</span>
+                            </div>
+                            <div className="space-y-0.5">
+                              <p className="font-bold text-[10px] text-slate-700 line-clamp-1 group-hover:text-pix transition-colors">
+                                {order.clientName}
+                              </p>
+                              <p className="text-[9px] text-slate-400 line-clamp-2 leading-tight">
+                                {order.items.map(it => `${it.quantity}x ${it.name}`).join(', ')}
+                              </p>
+                            </div>
+                            <div className="flex items-center justify-between border-t border-slate-50 pt-1.5">
+                              <span className="font-black text-[10px] text-slate-800">{formatBRL(order.totalAmount)}</span>
+                              <span className={`px-1.5 py-0.5 rounded-full border text-[8px] font-bold uppercase scale-90 ${statusConfig}`}>
+                                {formatStatusLabel(order.status).substring(0, 5)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Quick book button for empty future days */}
+                      {!isPast && onCreateBooking && dayOrders.length === 0 && scheduleSlots.filter(s => s.slotDate === dateStr && s.isEnabled && s.currentBookings < s.maxCapacity).length === 0 && (
+                        <div className="text-center py-8 text-slate-300 text-[10px] font-semibold italic">
+                          Sem agendamentos
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1169,6 +1368,340 @@ export const OrderManager: React.FC<OrderManagerProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== BOOKING MODAL ===== */}
+      {showBookingModal && (
+        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden border border-slate-100 shadow-2xl flex flex-col max-h-[92vh] animate-scale-in">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-pix/5 to-transparent">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-pix flex items-center justify-center flex-shrink-0">
+                  {isClinica ? <Stethoscope className="w-5 h-5 text-white" /> : <CalendarPlus className="w-5 h-5 text-white" />}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-800 text-base leading-tight">
+                    {isClinica ? 'Nova Consulta' : 'Novo Agendamento'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-semibold">
+                    {bookingSlot
+                      ? `${new Date(bookingSlot.slotDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })} às ${bookingSlot.slotTime}`
+                      : isClinica ? 'Selecione o horário e paciente' : 'Selecione o horário e cliente'}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowBookingModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-all">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+              {/* Calendar selection (when no slot pre-selected) */}
+              {!bookingSlot && scheduleCalendars.length > 1 && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Agenda</label>
+                  <select
+                    value={bookingCalendar?.id || ''}
+                    onChange={e => {
+                      const cal = scheduleCalendars.find(c => c.id === e.target.value);
+                      setBookingCalendar(cal || null);
+                      setBookingSelectedSlotId('');
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                  >
+                    <option value="">Selecione uma agenda...</option>
+                    {scheduleCalendars.filter(c => c.isEnabled).map(cal => (
+                      <option key={cal.id} value={cal.id}>{cal.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Slot selection (when no slot pre-selected) */}
+              {!bookingSlot && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Horário Disponível</label>
+                  {slotsForBookingCalendar.length === 0 ? (
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-700 font-semibold">
+                      <CalendarClock className="w-4 h-4 flex-shrink-0" />
+                      Nenhum horário disponível nesta agenda. Configure slots na aba Agenda Médica.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-40 overflow-y-auto pr-1">
+                      {slotsForBookingCalendar.map(slot => {
+                        const isSelected = bookingSelectedSlotId === slot.id;
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => setBookingSelectedSlotId(slot.id)}
+                            className={`p-2 rounded-xl border text-center transition-all text-xs font-bold ${
+                              isSelected
+                                ? 'bg-pix border-pix text-white shadow-sm'
+                                : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                            }`}
+                          >
+                            <div className="font-mono font-black text-sm">{slot.slotTime}</div>
+                            <div className="text-[8px] opacity-75 font-semibold mt-0.5">
+                              {new Date(slot.slotDate + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Selected slot summary */}
+              {bookingSlot && (
+                <div className="flex items-center gap-3 bg-pix-light border border-pix/20 rounded-xl p-3">
+                  <CalendarClock className="w-4 h-4 text-pix flex-shrink-0" />
+                  <div className="text-xs">
+                    <p className="font-black text-pix">{bookingSlot.slotTime}</p>
+                    <p className="text-slate-500 font-semibold">
+                      {new Date(bookingSlot.slotDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <div className="ml-auto text-right">
+                    <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                      {bookingSlot.maxCapacity - bookingSlot.currentBookings} vaga{bookingSlot.maxCapacity - bookingSlot.currentBookings !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Client section */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase">{isClinica ? 'Paciente' : 'Cliente'}</label>
+                  {clients.length > 0 && (
+                    <div className="flex bg-slate-100 p-0.5 rounded-lg gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setBookingClientMode('existing')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                          bookingClientMode === 'existing' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        Cadastrado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBookingClientMode('new')}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                          bookingClientMode === 'new' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        Novo
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {bookingClientMode === 'existing' && clients.length > 0 ? (
+                  <select
+                    value={bookingSelectedClientId}
+                    onChange={e => setBookingSelectedClientId(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                  >
+                    <option value="">{isClinica ? 'Selecionar paciente...' : 'Selecionar cliente...'}</option>
+                    {clients.map(cl => (
+                      <option key={cl.id} value={cl.id}>{cl.name}{cl.phone ? ` • ${cl.phone}` : ''}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder={isClinica ? 'Nome completo do paciente' : 'Nome completo do cliente'}
+                      value={bookingClientName}
+                      onChange={e => setBookingClientName(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="tel"
+                        placeholder="Telefone"
+                        value={bookingClientPhone}
+                        onChange={e => setBookingClientPhone(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="CPF"
+                        value={bookingClientDoc}
+                        onChange={e => setBookingClientDoc(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Service/Procedure section */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">{isClinica ? 'Procedimento / Consulta' : 'Serviço / Produto'}</label>
+                {products && products.length > 0 ? (
+                  <div className="space-y-2">
+                    <select
+                      value={bookingServiceId}
+                      onChange={e => {
+                        setBookingServiceId(e.target.value);
+                        if (e.target.value) {
+                          const prod = products.find(p => p.id === e.target.value);
+                          if (prod) {
+                            setBookingServiceCustomName(prod.name);
+                            setBookingServiceCustomPrice(prod.price);
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                    >
+                      <option value="">Selecionar serviço do catálogo...</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} — {formatBRL(p.price)}</option>
+                      ))}
+                    </select>
+                    {!bookingServiceId && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="Ou descreva o serviço"
+                          value={bookingServiceCustomName}
+                          onChange={e => setBookingServiceCustomName(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50"
+                        />
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">R$</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            placeholder="0,00"
+                            value={bookingServiceCustomPrice || ''}
+                            onChange={e => setBookingServiceCustomPrice(parseFloat(e.target.value) || 0)}
+                            className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder={isClinica ? 'Tipo de consulta' : 'Nome do serviço'}
+                      value={bookingServiceCustomName}
+                      onChange={e => setBookingServiceCustomName(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 font-semibold"
+                    />
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">R$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        placeholder="0,00"
+                        value={bookingServiceCustomPrice || ''}
+                        onChange={e => setBookingServiceCustomPrice(parseFloat(e.target.value) || 0)}
+                        className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Observações (opcional)</label>
+                <textarea
+                  placeholder={isClinica ? 'Motivo da consulta, sintomas, histórico...' : 'Detalhes adicionais do pedido...'}
+                  value={bookingNotes}
+                  onChange={e => setBookingNotes(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:outline-none focus:ring-1 focus:ring-pix/50 resize-none"
+                />
+              </div>
+
+              {/* Summary card */}
+              {(() => {
+                const selectedSlot = bookingSlot || slotsForBookingCalendar.find(s => s.id === bookingSelectedSlotId);
+                const clientName = bookingClientMode === 'existing'
+                  ? clients.find(c => c.id === bookingSelectedClientId)?.name
+                  : bookingClientName;
+                const svcName = bookingServiceId
+                  ? products?.find(p => p.id === bookingServiceId)?.name || bookingServiceCustomName
+                  : bookingServiceCustomName;
+                const price = bookingServiceId
+                  ? (products?.find(p => p.id === bookingServiceId)?.price || bookingServiceCustomPrice)
+                  : bookingServiceCustomPrice;
+                if (!selectedSlot && !clientName && !svcName) return null;
+                return (
+                  <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-2 text-xs">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wide">Resumo do Agendamento</p>
+                    {selectedSlot && (
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <CalendarClock className="w-3.5 h-3.5 text-pix flex-shrink-0" />
+                        <span className="font-bold">
+                          {new Date(selectedSlot.slotDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })} às {selectedSlot.slotTime}
+                        </span>
+                      </div>
+                    )}
+                    {clientName && (
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <User className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="font-semibold">{clientName}</span>
+                      </div>
+                    )}
+                    {svcName && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-slate-700">
+                          {isClinica ? <Stethoscope className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" /> : <Package className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />}
+                          <span className="font-semibold">{svcName}</span>
+                        </div>
+                        {price > 0 && <span className="font-black text-pix">{formatBRL(price)}</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 border-t border-slate-100 flex gap-3 flex-shrink-0 bg-slate-50/50">
+              <button
+                onClick={() => setShowBookingModal(false)}
+                className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-xl transition-all text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSubmitBooking}
+                disabled={isSubmittingBooking || (() => {
+                  const selectedSlot = bookingSlot || slotsForBookingCalendar.find(s => s.id === bookingSelectedSlotId);
+                  const clientName = bookingClientMode === 'existing'
+                    ? clients.find(c => c.id === bookingSelectedClientId)?.name
+                    : bookingClientName;
+                  const svcName = bookingServiceId
+                    ? (products?.find(p => p.id === bookingServiceId)?.name || '')
+                    : bookingServiceCustomName;
+                  return !selectedSlot || !clientName?.trim() || !svcName.trim();
+                })()}
+                className="flex-1 bg-pix hover:bg-pix-dark disabled:bg-slate-300 text-white font-bold py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 text-sm"
+              >
+                {isSubmittingBooking ? (
+                  <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Agendando...</>
+                ) : (
+                  <><CalendarPlus className="w-4 h-4" />{isClinica ? 'Confirmar Consulta' : 'Confirmar Agendamento'}</>
+                )}
+              </button>
             </div>
           </div>
         </div>

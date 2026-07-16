@@ -395,3 +395,95 @@ DROP TRIGGER IF EXISTS set_tenant_id_expenses ON public.expenses;
 CREATE TRIGGER set_tenant_id_expenses BEFORE INSERT ON public.expenses FOR EACH ROW EXECUTE FUNCTION public.set_tenant_id();
 
 
+-- ====================================================================
+-- MandaPIX - Trigger e Migração: Criação automática de funcionário ADMIN para Tenants
+-- ====================================================================
+
+-- 1. Atualizar a trigger function handle_new_user() para auto-criar loja e funcionário admin para novos tenants
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_default_plan_id UUID;
+  v_store_id UUID;
+  v_user_role public.user_role;
+BEGIN
+  -- Tentar obter o ID do plano gratuito por padrão
+  SELECT id INTO v_default_plan_id FROM public.subscription_plans WHERE name = 'Gratuito' LIMIT 1;
+
+  v_user_role := COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'tenant'::public.user_role);
+
+  INSERT INTO public.profiles (id, email, role, subscription_plan_id, subscription_status, ramo_empresa)
+  VALUES (
+    new.id,
+    new.email,
+    v_user_role,
+    COALESCE((new.raw_user_meta_data->>'subscription_plan_id')::uuid, v_default_plan_id),
+    COALESCE(new.raw_user_meta_data->>'subscription_status', 'active'),
+    COALESCE(new.raw_user_meta_data->>'ramo_empresa', 'varejo')
+  );
+
+  -- Se for tenant, criar loja padrão e funcionário admin
+  IF v_user_role = 'tenant'::public.user_role THEN
+    INSERT INTO public.stores (tenant_id, name, description, color)
+    VALUES (
+      new.id,
+      'Minha Loja',
+      'Loja padrão pré-configurada.',
+      'from-slate-600 to-blue-700'
+    )
+    RETURNING id INTO v_store_id;
+
+    INSERT INTO public.employees (tenant_id, store_id, name, email, phone, role, access_code, allow_wallets)
+    VALUES (
+      new.id,
+      v_store_id,
+      'Administrador',
+      new.email,
+      '',
+      'ADMIN',
+      'ADMIN',
+      true
+    );
+  END IF;
+
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2. Migração para criar loja e funcionário admin para tenants já existentes
+DO $$
+DECLARE
+  r RECORD;
+  v_store_id UUID;
+BEGIN
+  FOR r IN SELECT id, email, trade_name, phone FROM public.profiles WHERE role = 'tenant' LOOP
+    -- Obter ou criar loja para este tenant
+    SELECT id INTO v_store_id FROM public.stores WHERE tenant_id = r.id LIMIT 1;
+    IF v_store_id IS NULL THEN
+      INSERT INTO public.stores (tenant_id, name, description, color)
+      VALUES (r.id, 'Minha Loja', 'Loja padrão pré-configurada.', 'from-slate-600 to-blue-700')
+      RETURNING id INTO v_store_id;
+    END IF;
+
+    -- Criar funcionário administrador se não existir
+    IF NOT EXISTS (SELECT 1 FROM public.employees WHERE tenant_id = r.id AND email = r.email) THEN
+      INSERT INTO public.employees (tenant_id, store_id, name, email, phone, role, access_code, allow_wallets)
+      VALUES (
+        r.id,
+        v_store_id,
+        COALESCE(r.trade_name, 'Administrador'),
+        r.email,
+        COALESCE(r.phone, ''),
+        'ADMIN',
+        'ADMIN',
+        true
+      );
+    END IF;
+  END FOR;
+END $$;
+
+
+-- 3. Adicionar coluna crm_cro na tabela de funcionários se não existir
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS crm_cro TEXT;
+
+

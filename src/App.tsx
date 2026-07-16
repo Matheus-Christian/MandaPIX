@@ -195,7 +195,7 @@ function MandaPixApp() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
   const currentTenantId = activeEmployee?.tenantId || user?.id;
-  const isDirectEmployee = !!(activeEmployee && user && activeEmployee.email === user.email);
+  const isDirectEmployee = !!(activeEmployee && user && activeEmployee.email === user.email && activeEmployee.role !== 'ADMIN' && activeEmployee.role !== 'admin');
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinError, setPinError] = useState('');
   const [selectedEmployeeIdForPin, setSelectedEmployeeIdForPin] = useState('');
@@ -549,7 +549,8 @@ function MandaPixApp() {
         role: d.role as any,
         accessCode: d.access_code,
         allowWallets: d.allow_wallets,
-        commission_rate: d.commission_rate !== undefined ? Number(d.commission_rate) : 30
+        commission_rate: d.commission_rate !== undefined ? Number(d.commission_rate) : 30,
+        crm_cro: d.crm_cro
       })));
     } catch (err) {
       console.warn('Erro ao carregar funcionários do Supabase. Usando dados locais:', err);
@@ -1047,6 +1048,67 @@ function MandaPixApp() {
           }
         }
 
+        // 3. Autocriação de funcionário ADMIN se for Tenant e não tiver funcionário vinculado
+        if (!employeeData) {
+          try {
+            const { data: profileData } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', user.id)
+              .maybeSingle();
+
+            if (profileData && profileData.role === 'tenant') {
+              let storeId: string | null = null;
+              const { data: storeData } = await supabase
+                .from('stores')
+                .select('id')
+                .eq('tenant_id', user.id)
+                .limit(1);
+
+              if (storeData && storeData.length > 0) {
+                storeId = storeData[0].id;
+              } else {
+                const { data: newStore, error: storeErr } = await supabase
+                  .from('stores')
+                  .insert([{
+                    tenant_id: user.id,
+                    name: 'Minha Loja',
+                    description: 'Loja padrão pré-configurada.',
+                    color: 'from-slate-600 to-blue-700'
+                  }])
+                  .select('id')
+                  .single();
+                if (!storeErr && newStore) {
+                  storeId = newStore.id;
+                }
+              }
+
+              if (storeId) {
+                const { data: newEmp, error: empErr } = await supabase
+                  .from('employees')
+                  .insert([{
+                    tenant_id: user.id,
+                    store_id: storeId,
+                    name: profileData.trade_name || 'Administrador',
+                    email: user.email,
+                    phone: profileData.phone || '',
+                    role: 'ADMIN',
+                    access_code: 'ADMIN',
+                    allow_wallets: true
+                  }])
+                  .select('*')
+                  .single();
+
+                if (!empErr && newEmp) {
+                  employeeData = newEmp;
+                }
+              }
+            }
+          } catch (autoErr) {
+            console.error('Erro na autocriação do funcionário admin para tenant:', autoErr);
+          }
+        }
+
         if (employeeData) {
           const emp: Employee = {
             id: employeeData.id,
@@ -1215,7 +1277,8 @@ function MandaPixApp() {
           phone: newEmpData.phone,
           role: newEmpData.role,
           access_code: newEmpData.accessCode,
-          allow_wallets: newEmpData.allowWallets || false
+          allow_wallets: newEmpData.allowWallets || false,
+          crm_cro: newEmpData.crm_cro
         }]);
       if (error) throw error;
       await loadEmployees();
@@ -1242,7 +1305,8 @@ function MandaPixApp() {
           phone: updatedEmp.phone,
           role: updatedEmp.role,
           access_code: updatedEmp.accessCode,
-          allow_wallets: updatedEmp.allowWallets || false
+          allow_wallets: updatedEmp.allowWallets || false,
+          crm_cro: updatedEmp.crm_cro
         })
         .eq('id', updatedEmp.id);
       if (error) throw error;
@@ -1257,6 +1321,11 @@ function MandaPixApp() {
 
   const handleDeleteEmployee = async (id: string) => {
     if (!currentTenantId) return;
+    const employeeToDelete = employees.find(e => e.id === id);
+    if (employeeToDelete && (employeeToDelete.role === 'ADMIN' || employeeToDelete.role === 'admin')) {
+      alert('O funcionário Administrador não pode ser excluído.');
+      return;
+    }
     try {
       const { error } = await supabase
         .from('employees')
@@ -1974,7 +2043,7 @@ function MandaPixApp() {
     { id: 'wallets', label: 'Carteiras', icon: WalletIcon }
   ] as const;
 
-  const visibleMenuItems = activeEmployee 
+  const visibleMenuItems = (activeEmployee && activeEmployee.role !== 'ADMIN' && activeEmployee.role !== 'admin')
     ? (activeEmployee.allowWallets
         ? menuItems.filter(item => item.id === 'stores' || item.id === 'wallets')
         : menuItems.filter(item => item.id === 'stores')
@@ -2167,7 +2236,7 @@ function MandaPixApp() {
                   )}
                 </div>
               </div>
-              {activeEmployee ? (
+              {activeEmployee && activeEmployee.role !== 'ADMIN' && activeEmployee.role !== 'admin' ? (
                 <button
                   onClick={() => {
                     if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
@@ -2310,7 +2379,7 @@ function MandaPixApp() {
                       )}
                     </div>
                   </div>
-                  {activeEmployee ? (
+                  {activeEmployee && activeEmployee.role !== 'ADMIN' && activeEmployee.role !== 'admin' ? (
                     <button
                       onClick={() => {
                         if (confirm("Deseja sair do modo funcionário e retornar ao painel principal?")) {
@@ -2812,7 +2881,7 @@ function MandaPixApp() {
                           </div>
                           <div className="text-left">
                             <p className="text-xs font-bold text-slate-800 leading-none">{activeEmployee?.name}</p>
-                            <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider mt-0.5 block">{activeEmployee?.role === 'GERENTE' ? 'Gerente' : activeEmployee?.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'}</span>
+                            <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider mt-0.5 block">{activeEmployee?.role === 'ADMIN' || activeEmployee?.role === 'admin' ? 'Admin' : activeEmployee?.role === 'GERENTE' ? 'Gerente' : activeEmployee?.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'}</span>
                           </div>
                         </div>
                         <button
@@ -3008,6 +3077,7 @@ function MandaPixApp() {
                     onEditEmployee={handleEditEmployee}
                     onDeleteEmployee={handleDeleteEmployee}
                     orders={orders.filter(o => o.storeId === activeStoreId)}
+                    isClinica={isClinica}
                   />
                 )}
 
@@ -3108,10 +3178,14 @@ function MandaPixApp() {
                 >
                   <option value="" disabled>Selecione um perfil...</option>
                   {employees
-                    .filter(e => e.storeId === activeStoreId)
+                    .filter(e => e.storeId === activeStoreId && e.role !== 'ADMIN' && e.role !== 'admin')
                     .map(emp => (
                       <option key={emp.id} value={emp.id}>
-                        {emp.name} ({emp.role === 'GERENTE' ? 'Gerente' : emp.role === 'VENDEDOR' ? 'Vendedor' : 'Atendente'})
+                        {emp.name} ({
+                          emp.role === 'ADMIN' || emp.role === 'admin' ? 'Admin' :
+                          emp.role === 'GERENTE' ? (isClinica ? 'Gerente Clínico' : 'Gerente') :
+                          emp.role === 'VENDEDOR' ? (isClinica ? 'Médico' : 'Vendedor') : 'Atendente'
+                        })
                       </option>
                     ))}
                 </select>

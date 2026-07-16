@@ -8,6 +8,7 @@ interface EmployeeManagerProps {
   onEditEmployee: (employee: Employee) => void;
   onDeleteEmployee: (id: string) => void;
   orders?: Order[];
+  isClinica?: boolean;
 }
 
 export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
@@ -16,6 +17,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
   onEditEmployee,
   onDeleteEmployee,
   orders = [],
+  isClinica = false,
 }) => {
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -25,11 +27,12 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState<'GERENTE' | 'VENDEDOR' | 'ATENDENTE'>('VENDEDOR');
+  const [role, setRole] = useState<'ADMIN' | 'admin' | 'GERENTE' | 'VENDEDOR' | 'ATENDENTE'>('VENDEDOR');
   const [accessCode, setAccessCode] = useState('');
   const [showAccessCode, setShowAccessCode] = useState(false);
   const [allowWallets, setAllowWallets] = useState(false);
   const [commissionRate, setCommissionRate] = useState('30');
+  const [crmCro, setCrmCro] = useState('');
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const startEditEmployee = (emp: Employee) => {
@@ -41,6 +44,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setAccessCode(emp.accessCode);
     setAllowWallets(emp.allowWallets || false);
     setCommissionRate(emp.commission_rate ? emp.commission_rate.toString() : '30');
+    setCrmCro(emp.crm_cro || '');
     setIsAdding(true);
     setErrors({});
   };
@@ -55,6 +59,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setAccessCode('');
     setAllowWallets(false);
     setCommissionRate('30');
+    setCrmCro('');
     setErrors({});
   };
 
@@ -80,10 +85,12 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
       newErrors.email = 'E-mail inválido';
     }
     if (!phone.trim()) newErrors.phone = 'Telefone é obrigatório';
-    if (!accessCode.trim()) {
-      newErrors.accessCode = 'Código de acesso é obrigatório';
-    } else if (accessCode.trim().length < 4) {
-      newErrors.accessCode = 'Código de acesso deve ter pelo menos 4 dígitos';
+    if (role !== 'ADMIN' && role !== 'admin') {
+      if (!accessCode.trim()) {
+        newErrors.accessCode = 'Código de acesso é obrigatório';
+      } else if (accessCode.trim().length < 4) {
+        newErrors.accessCode = 'Código de acesso deve ter pelo menos 4 dígitos';
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -100,7 +107,8 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         role,
         accessCode: accessCode.trim(),
         allowWallets: allowWallets,
-        commission_rate: Number(commissionRate)
+        commission_rate: Number(commissionRate),
+        crm_cro: (isClinica && ['VENDEDOR', 'GERENTE', 'ADMIN', 'admin'].includes(role)) ? crmCro.trim() : undefined
       });
     } else {
       onAddEmployee({
@@ -110,7 +118,8 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
         role,
         accessCode: accessCode.trim(),
         allowWallets: allowWallets,
-        commission_rate: Number(commissionRate)
+        commission_rate: Number(commissionRate),
+        crm_cro: (isClinica && ['VENDEDOR', 'GERENTE', 'ADMIN', 'admin'].includes(role)) ? crmCro.trim() : undefined
       });
     }
 
@@ -122,6 +131,7 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
     setAccessCode('');
     setAllowWallets(false);
     setCommissionRate('30');
+    setCrmCro('');
     setEditingEmployee(null);
     setErrors({});
     setIsAdding(false);
@@ -194,14 +204,34 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                   <select
                     value={role}
                     onChange={(e) => setRole(e.target.value as any)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-805 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all"
+                    disabled={editingEmployee?.role === 'ADMIN' || editingEmployee?.role === 'admin'}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all disabled:opacity-60"
                   >
-                    <option value="GERENTE">Gerente (Acesso Administrativo)</option>
-                    <option value="VENDEDOR">Vendedor (PDV, Pedidos, Agenda)</option>
-                    <option value="ATENDENTE">Atendente (Pedidos, Agenda)</option>
+                    {(editingEmployee?.role === 'ADMIN' || editingEmployee?.role === 'admin') && (
+                      <option value={editingEmployee.role}>Admin (Dono do Tenant)</option>
+                    )}
+                    <option value="GERENTE">{isClinica ? 'Gerente / Administrador Clínico' : 'Gerente (Acesso Administrativo)'}</option>
+                    <option value="VENDEDOR">{isClinica ? 'Médico / Dentista / Profissional de Saúde' : 'Vendedor (PDV, Pedidos, Agenda)'}</option>
+                    <option value="ATENDENTE">{isClinica ? 'Atendente / Secretário(a) / Recepção' : 'Atendente (Pedidos, Agenda)'}</option>
                   </select>
                 </div>
               </div>
+
+              {isClinica && ['VENDEDOR', 'GERENTE', 'ADMIN', 'admin'].includes(role) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Registro Profissional (CRM, CRO, etc.)</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: CRM/SP 123456"
+                      value={crmCro}
+                      onChange={(e) => setCrmCro(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-808 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-bold placeholder-slate-400"
+                    />
+                  </div>
+                  <div></div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -211,7 +241,8 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                     placeholder="joao@empresa.com"
                     value={email}
                     onChange={(e) => { setEmail(e.target.value); if (errors.email) setErrors(prev => ({ ...prev, email: '' })); }}
-                    className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all ${errors.email ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                    disabled={editingEmployee?.role === 'ADMIN' || editingEmployee?.role === 'admin'}
+                    className={`w-full px-3 py-2 text-sm border rounded-xl bg-slate-50 text-slate-808 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all disabled:opacity-60 ${errors.email ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
                   />
                   {errors.email && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.email}</p>}
                 </div>
@@ -229,26 +260,35 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Código de Acesso (PIN/Senha)</label>
-                  <div className="relative">
-                    <input
-                      type={showAccessCode ? 'text' : 'password'}
-                      placeholder="Mínimo 4 caracteres (Ex: 1234)"
-                      value={accessCode}
-                      onChange={(e) => { setAccessCode(e.target.value); if (errors.accessCode) setErrors(prev => ({ ...prev, accessCode: '' })); }}
-                      className={`w-full px-3 py-2 pr-12 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-mono ${errors.accessCode ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAccessCode(!showAccessCode)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-655"
-                    >
-                      {showAccessCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                {editingEmployee?.role === 'ADMIN' || editingEmployee?.role === 'admin' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Código de Acesso (PIN/Senha)</label>
+                    <div className="w-full px-3 py-2 text-sm border border-slate-100 rounded-xl bg-slate-50 text-slate-400 font-medium">
+                      Não aplicável para o Administrador
+                    </div>
                   </div>
-                  {errors.accessCode && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.accessCode}</p>}
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Código de Acesso (PIN/Senha)</label>
+                    <div className="relative">
+                      <input
+                        type={showAccessCode ? 'text' : 'password'}
+                        placeholder="Mínimo 4 caracteres (Ex: 1234)"
+                        value={accessCode}
+                        onChange={(e) => { setAccessCode(e.target.value); if (errors.accessCode) setErrors(prev => ({ ...prev, accessCode: '' })); }}
+                        className={`w-full px-3 py-2 pr-12 text-sm border rounded-xl bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-pix/50 focus:bg-white transition-all font-mono ${errors.accessCode ? 'border-red-400 ring-2 ring-red-100' : 'border-slate-200'}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAccessCode(!showAccessCode)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-655"
+                      >
+                        {showAccessCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {errors.accessCode && <p className="text-red-500 text-[10px] mt-0.5 ml-1">{errors.accessCode}</p>}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Taxa de Comissão (%)</label>
@@ -348,21 +388,31 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                           </td>
                           <td className="p-4">
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                              emp.role === 'GERENTE' 
+                              emp.role === 'ADMIN' || emp.role === 'admin'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : emp.role === 'GERENTE' 
                                 ? 'bg-purple-50 text-purple-700 border-purple-100'
                                 : emp.role === 'VENDEDOR'
                                 ? 'bg-blue-50 text-blue-700 border-blue-100'
                                 : 'bg-slate-50 text-slate-600 border-slate-150'
                             }`}>
-                              {emp.role}
+                              {isClinica 
+                                ? (emp.role === 'ADMIN' || emp.role === 'admin' ? 'Admin' : emp.role === 'GERENTE' ? 'Gerente Clínico' : emp.role === 'VENDEDOR' ? 'Médico' : 'Atendente')
+                                : emp.role
+                              }
                             </span>
+                            {isClinica && ['VENDEDOR', 'GERENTE', 'ADMIN', 'admin'].includes(emp.role) && emp.crm_cro && (
+                              <span className="text-[9px] text-slate-400 font-semibold block mt-1 font-mono uppercase tracking-wider">
+                                {emp.crm_cro}
+                              </span>
+                            )}
                           </td>
                           <td className="p-4 space-y-0.5">
                             <span className="text-slate-700 block font-medium">{emp.email}</span>
                             <span className="text-slate-400 block font-semibold text-[10px]">{emp.phone}</span>
                           </td>
-                          <td className="p-4 font-mono font-bold text-slate-655">
-                            •••• (PIN Oculto)
+                          <td className="p-4 font-mono font-bold text-slate-400">
+                            {emp.role === 'ADMIN' || emp.role === 'admin' ? 'N/A (Senha do Tenant)' : '•••• (PIN Oculto)'}
                           </td>
                           <td className="p-4 font-bold text-slate-800 font-mono">
                             {emp.commission_rate ?? 30}%
@@ -384,13 +434,15 @@ export const EmployeeManager: React.FC<EmployeeManagerProps> = ({
                             >
                               <Edit className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDelete(emp.id, emp.name)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all active:scale-90"
-                              title="Excluir Perfil"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {emp.role !== 'ADMIN' && emp.role !== 'admin' && (
+                              <button
+                                onClick={() => handleDelete(emp.id, emp.name)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all active:scale-90"
+                                title="Excluir Perfil"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

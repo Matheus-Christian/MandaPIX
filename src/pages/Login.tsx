@@ -59,23 +59,23 @@ export const Login: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-400 font-medium text-sm">Carregando sessão...</p>
+          <p className="text-slate-500 font-medium text-sm">Carregando sessão...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 relative overflow-hidden font-sans">
       {/* Elementos de fundo abstratos e brilhantes */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-teal-500/5 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none"></div>
       
       {/* Card de Login Glassmorphic */}
-      <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-8 md:p-10 shadow-2xl relative z-10">
+      <div className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-slate-200/80 rounded-3xl p-8 md:p-10 shadow-xl shadow-slate-200/50 relative z-10">
         
         {/* Logo e Título */}
         <div className="flex flex-col items-center mb-8">
@@ -86,17 +86,17 @@ export const Login: React.FC = () => {
               <path d="M67.5 45L90 67.5L67.5 90L45 67.5L67.5 45Z" />
             </svg>
           </div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight text-center leading-none">
+          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight text-center leading-none">
             Bem-vindo ao MandaPIX
           </h2>
-          <p className="text-xs text-slate-400 font-semibold mt-2 text-center uppercase tracking-wider">
-            Gestão Multi-lojas e Cobranças Inteligentes
+          <p className="text-xs text-slate-500 font-semibold mt-2 text-center uppercase tracking-wider">
+            O ERP de Gestão do Autônomo
           </p>
         </div>
 
         {/* Mensagem de Erro com Animação */}
         {errorMsg && (
-          <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-start gap-3 text-rose-300 animate-[shake_0.4s_ease-in-out]">
+          <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-600 animate-[shake_0.4s_ease-in-out]">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <span className="text-xs font-semibold leading-relaxed">{errorMsg}</span>
           </div>
@@ -106,9 +106,9 @@ export const Login: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Campo de E-mail */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">E-mail</label>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">E-mail</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
                 <Mail className="w-4 h-4" />
               </div>
               <input
@@ -117,7 +117,7 @@ export const Login: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="seuemail@exemplo.com"
-                className="w-full bg-slate-950/50 border border-slate-800 text-white rounded-2xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-teal-500/80 focus:ring-1 focus:ring-teal-500/50 transition-all font-medium placeholder-slate-600 hover:border-slate-700"
+                className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 rounded-2xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all font-medium placeholder-slate-400 hover:border-slate-300"
               />
             </div>
           </div>
@@ -125,10 +125,10 @@ export const Login: React.FC = () => {
           {/* Campo de Senha */}
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">Senha</label>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Senha</label>
             </div>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
                 <Lock className="w-4 h-4" />
               </div>
               <input
@@ -137,12 +137,12 @@ export const Login: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Digite sua senha"
-                className="w-full bg-slate-950/50 border border-slate-800 text-white rounded-2xl py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-teal-500/80 focus:ring-1 focus:ring-teal-500/50 transition-all font-medium placeholder-slate-600 hover:border-slate-700"
+                className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 rounded-2xl py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all font-medium placeholder-slate-400 hover:border-slate-300"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-slate-300 transition-colors"
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -167,8 +167,8 @@ export const Login: React.FC = () => {
         </form>
 
         {/* Nota de rodapé explicativa */}
-        <div className="mt-8 text-center border-t border-slate-800/60 pt-6">
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">
+        <div className="mt-8 text-center border-t border-slate-100 pt-6">
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">
             Área segura criptografada
           </p>
         </div>

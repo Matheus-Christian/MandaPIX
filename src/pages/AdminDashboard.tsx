@@ -319,7 +319,12 @@ export const AdminDashboard: React.FC = () => {
       const allEmployees = employeesData || [];
       setEmployees(allEmployees);
 
-      const employeeEmails = new Set(allEmployees.map((e: any) => e.email.toLowerCase()));
+      // Filtra apenas funcionários comuns (não admins) da lista de tenants
+      const employeeEmails = new Set(
+        allEmployees
+          .filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin')
+          .map((e: any) => e.email.toLowerCase())
+      );
 
       // Cast para o tipo correto para calar o TypeScript e filtra funcionários
       const formattedProfiles = (profilesData || [])
@@ -420,6 +425,37 @@ export const AdminDashboard: React.FC = () => {
         if (profileError) {
           console.error('Erro ao registrar perfil do tenant:', profileError);
           throw new Error('Usuário autenticado criado, mas erro ao registrar perfil no banco: ' + profileError.message);
+        }
+
+        // Criar loja padrão e funcionário admin para o novo tenant
+        try {
+          const { data: newStore, error: storeError } = await supabase
+            .from('stores')
+            .insert([{
+              tenant_id: newUser.id,
+              name: 'Minha Loja',
+              description: 'Loja padrão pré-configurada.',
+              color: 'from-slate-600 to-blue-700'
+            }])
+            .select('id')
+            .single();
+
+          if (!storeError && newStore) {
+            await supabase
+              .from('employees')
+              .insert([{
+                tenant_id: newUser.id,
+                store_id: newStore.id,
+                name: 'Administrador',
+                email: tenantEmail,
+                phone: '',
+                role: 'ADMIN',
+                access_code: 'ADMIN',
+                allow_wallets: true
+              }]);
+          }
+        } catch (autoErr) {
+          console.warn('Erro ao criar loja/funcionário admin padrão no dashboard:', autoErr);
         }
       }
 

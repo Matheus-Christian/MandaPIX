@@ -298,19 +298,48 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   v_default_plan_id UUID;
+  v_store_id UUID;
+  v_user_role public.user_role;
 BEGIN
   -- Tentar obter o ID do plano gratuito por padrão
   SELECT id INTO v_default_plan_id FROM public.subscription_plans WHERE name = 'Gratuito' LIMIT 1;
+
+  v_user_role := COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'tenant'::public.user_role);
 
   INSERT INTO public.profiles (id, email, role, subscription_plan_id, subscription_status, ramo_empresa)
   VALUES (
     new.id,
     new.email,
-    COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'tenant'::public.user_role),
+    v_user_role,
     COALESCE((new.raw_user_meta_data->>'subscription_plan_id')::uuid, v_default_plan_id),
     COALESCE(new.raw_user_meta_data->>'subscription_status', 'active'),
     COALESCE(new.raw_user_meta_data->>'ramo_empresa', 'varejo')
   );
+
+  -- Se for tenant, criar loja padrão e funcionário admin
+  IF v_user_role = 'tenant'::public.user_role THEN
+    INSERT INTO public.stores (tenant_id, name, description, color)
+    VALUES (
+      new.id,
+      'Minha Loja',
+      'Loja padrão pré-configurada.',
+      'from-slate-600 to-blue-700'
+    )
+    RETURNING id INTO v_store_id;
+
+    INSERT INTO public.employees (tenant_id, store_id, name, email, phone, role, access_code, allow_wallets)
+    VALUES (
+      new.id,
+      v_store_id,
+      'Administrador',
+      new.email,
+      '',
+      'ADMIN',
+      'ADMIN',
+      true
+    );
+  END IF;
+
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -679,6 +708,7 @@ CREATE TABLE IF NOT EXISTS public.employees (
   phone TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'VENDEDOR', -- 'GERENTE', 'VENDEDOR', 'ATENDENTE'
   access_code TEXT NOT NULL, -- PIN ou Código de Acesso
+  crm_cro TEXT, -- Registro Profissional (CRM, CRO, etc.) para médicos em Clínicas
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

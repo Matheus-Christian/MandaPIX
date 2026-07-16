@@ -459,10 +459,11 @@ export interface Employee {
   name: string;
   email: string;
   phone: string;
-  role: 'GERENTE' | 'VENDEDOR' | 'ATENDENTE';
+  role: 'ADMIN' | 'admin' | 'GERENTE' | 'VENDEDOR' | 'ATENDENTE';
   accessCode: string;
   allowWallets?: boolean;
   commission_rate?: number;
+  crm_cro?: string;
 }
 
 export interface Catalog {
